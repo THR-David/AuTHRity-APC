@@ -1,0 +1,38 @@
+[opcua]
+endpoint_url = "opc.tcp://localhost:4855"
+security_policy = "Basic256Sha256"
+message_mode = "SignAndEncrypt"
+namespace_index = 2
+
+[identity]
+app_name = "AuTHRity Virtual Plant"
+app_uri = "urn:authrity:virtual-plant"
+auto_create_keys = true
+trust_server_certs = true
+
+[auth]
+mode = "username" # "username" | "x509"
+username = "virtual_plant"
+password = "password"
+
+[runtime]
+# Simulation speed multiplier (10 = 10x real-time)
+speed_multiplier = 10
+reconnect_delay_sec = 5
+cycle_time_ms = 1000
+
+[debutanizer]
+num_stages = 12
+feed_stage = 6
+relative_volatility = 2.2
+hold_up_molar = 15000.0
+dt_seconds = 1.0
+
+[cstr]
+# CSTR uses default initialization
+
+[paths]
+# Relative to executable
+pki_dir = "pki"
+cert_path = "pki/own/cert.der"
+key_path = "pki/own/private.pem"

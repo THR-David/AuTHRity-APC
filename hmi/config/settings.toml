@@ -1,0 +1,45 @@
+[opcua]
+endpoint_url = "opc.tcp://localhost:4855"
+security_policy = "Basic256Sha256" # Optional: make this configurable
+message_mode = "SignAndEncrypt"    # Optional: make this configurable
+namespace_index = 2                
+
+[identity]
+app_name = "AuTHRity HMI"
+app_uri = "urn:authrity:hmi" # Unique per instance
+auto_create_keys = true
+trust_server_certs = true
+
+[auth]
+mode = "username" # "username" | "x509"
+username = "hmi"
+password = "password"
+
+[runtime]
+model_path = "config/model.json"
+reconnect_delay_sec = 5
+
+[services]
+supervisor_url = "http://127.0.0.1:8080"
+supervisor_api_key = "secret-deploy-key"
+opc_hot_reload_url = "http://127.0.0.1:9090"
+
+[paths]
+# Relative to executable
+pki_dir = "pki"
+cert_path = "pki/own/cert.der"
+key_path = "pki/own/private.pem"
+
+[historian]
+enabled = true
+host = "localhost"
+ilp_port = 9009
+http_port = 9000
+rest_port = 9000
+table_name = "process_data"
+batch_size = 100
+flush_interval_ms = 1000
+snapshot_interval_sec = 60  # Log all nodes every 60 seconds (even if unchanged)
+
+[hmi_auth]
+database_url = "sqlite:config/hmi_auth.db"

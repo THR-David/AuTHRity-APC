@@ -1,0 +1,266 @@
+{
+  "metadata": {
+    "name": "VP_CSTR",
+    "description": "Virtual Plant - CSTR Exothermic Reactor (Empty Template)",
+    "version": "1.2",
+    "model_type": "step_response"
+  },
+  "tuning": {
+    "prediction_horizon": 30,
+    "control_horizon": 5,
+    "sample_time": 10,
+    "solver_tolerance": 0.0001,
+    "max_iterations": 50
+  },
+  "variables": {
+    "cvs": [
+      {
+        "name": "CSTR_Temp",
+        "description": "Reactor Internal Temperature",
+        "units": "K",
+        "weight": 0,
+        "alpha": 0,
+        "ece_factor": 20,
+        "limits": {
+          "low_low": 290,
+          "low": 300,
+          "target": 311,
+          "high": 320,
+          "high_high": 330
+        },
+        "node_ids": {
+          "pv": "CSTR_Temp:PV",
+          "target": "CSTR_Temp:Target",
+          "prediction": "CSTR_Temp:Prediction",
+          "limits": {
+            "high": "CSTR_Temp:HighLimit",
+            "low": "CSTR_Temp:LowLimit",
+            "hh": "CSTR_Temp:HighHighLimit",
+            "ll": "CSTR_Temp:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "CSTR_Conc",
+        "description": "Concentration of Reactant A",
+        "units": "kmol/m3",
+        "weight": 0,
+        "alpha": 0,
+        "ece_factor": 10,
+        "limits": {
+          "low_low": 0,
+          "low": 0,
+          "target": 8.5,
+          "high": 10,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "CSTR_Conc:PV",
+          "target": "CSTR_Conc:Target",
+          "prediction": "CSTR_Conc:Prediction",
+          "limits": {
+            "high": "CSTR_Conc:HighLimit",
+            "low": "CSTR_Conc:LowLimit",
+            "hh": "CSTR_Conc:HighHighLimit",
+            "ll": "CSTR_Conc:LowLowLimit"
+          }
+        }
+      }
+    ],
+    "mvs": [
+      {
+        "name": "CSTR_Cooling",
+        "description": "Cooling Jacket Temperature Setpoint",
+        "units": "K",
+        "weight_r": 1,
+        "max_move": 0,
+        "limits": {
+          "low_low": 0,
+          "low": 280,
+          "high": 310,
+          "high_high": 100
+        },
+        "node_ids": {
+          "pv": "CSTR_Cooling:PV",
+          "sp": "CSTR_Cooling:SP",
+          "op": "CSTR_Cooling:OP",
+          "mode": "CSTR_Cooling:Mode",
+          "mode_target": "CSTR_Cooling:ModeTarget",
+          "future_plan": "CSTR_Cooling:FuturePlan",
+          "limits": {
+            "high": "CSTR_Cooling:HighLimit",
+            "low": "CSTR_Cooling:LowLimit",
+            "hh": "CSTR_Cooling:HighHighLimit",
+            "ll": "CSTR_Cooling:LowLowLimit"
+          }
+        }
+      }
+    ],
+    "dvs": [
+      {
+        "name": "CSTR_Feed",
+        "description": "Feed Flow Rate",
+        "units": "m3/h",
+        "limits": {
+          "low": 0,
+          "high": 12
+        },
+        "node_ids": {
+          "pv": "CSTR_Feed:PV",
+          "limits": {
+            "high": "CSTR_Feed:HighLimit",
+            "low": "CSTR_Feed:LowLimit"
+          }
+        }
+      }
+    ]
+  },
+  "physics": {
+    "gain": [],
+    "tau": [],
+    "dead_time": [],
+    "gain_dv": [],
+    "tau_dv": [],
+    "dead_time_dv": [],
+    "step_coefficients": [
+      [
+        [
+          0.004578633645272135,
+          0.019756422302075607,
+          0.03416421864378297,
+          0.04756248989477581,
+          0.05745085669962574,
+          0.06610836430712015,
+          0.0738690920396864,
+          0.0797472752369129,
+          0.08525525673378337,
+          0.08942001352987933,
+          0.09325168059777426,
+          0.09617638192403402,
+          0.09868277890761601,
+          0.10097800862157773,
+          0.10274310291351814,
+          0.10418921654842454,
+          0.10547072698736787,
+          0.10656508423166919,
+          0.10749382807295323,
+          0.10821889660880128,
+          0.10883113328629086,
+          0.10934627233484973,
+          0.10981832375331708,
+          0.11016826327595887,
+          0.11050364912513687,
+          0.11075196349574784,
+          0.11096393996411687,
+          0.11115962840740191,
+          0.11130625967939024,
+          0.11144502167783185
+        ]
+      ],
+      [
+        [
+          -0.00044794274453145987,
+          -0.0006785222273125805,
+          -0.001177603914341855,
+          -0.0019242719339132993,
+          -0.002677725984348858,
+          -0.003502398369663141,
+          -0.004394654637688486,
+          -0.005183672763621499,
+          -0.006027643572909086,
+          -0.006745157407165037,
+          -0.007476765067619035,
+          -0.008089737367800911,
+          -0.008659628902699522,
+          -0.009224151872015812,
+          -0.009691380575500572,
+          -0.010099541281701225,
+          -0.010484013042882647,
+          -0.010832172140330899,
+          -0.011144946042561776,
+          -0.011402263590149897,
+          -0.011630166401673301,
+          -0.011830878714434655,
+          -0.012023323598754944,
+          -0.01217224190220965,
+          -0.01232095543355376,
+          -0.012435529198985369,
+          -0.01253692863143917,
+          -0.012634019144536135,
+          -0.012709373467287722,
+          -0.012783148838495953
+        ]
+      ]
+    ],
+    "dv_coefficients": [
+      [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ],
+      [
+        [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ]
+      ]
+    ]
+  }
+}

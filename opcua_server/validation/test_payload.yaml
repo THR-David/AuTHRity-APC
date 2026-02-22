@@ -1,0 +1,9 @@
+nodes:
+  - nodeId: "HotReloadTest:Model"
+    nodeClass: "Object"
+    description: "Hot Reloaded Model Validation"
+  - nodeId: "HotReloadTest:Setpoint"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 99.9
+    description: "Dynamically injected setpoint"

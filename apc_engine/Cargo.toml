@@ -1,0 +1,41 @@
+[package]
+name = "authrity-apc-engine"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+# Async Runtime
+tokio = { version = "1", features = ["full"] }
+
+# The Library YOU Want (FreeOpcUa/async-opcua)
+# We enable 'client' and 'json' (optional, but good for debug)
+async-opcua = { version = "0.17", features = ["client"] }
+
+# Math & Optimization
+nalgebra = { version = "0.32", features = ["serde-serialize"] }
+clarabel = "0.11.1" # Upgraded for solver reuse and Auto factorization
+
+# Serialization (Required for model.json)
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0" # <--- ADDED: Necessary for loading your config
+serde_yaml = "0.9"
+
+# Time & Date
+chrono = "0.4"
+
+# Logging
+log = "0.4"
+env_logger = "0.10"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+anyhow = "1.0"
+toml = "0.9.10"
+clap = { version = "4.5.54", features = ["derive"] }
+
+[dev-dependencies]
+# Only used during testing (cargo test)
+approx = "0.5"  # Float comparison with epsilon tolerance

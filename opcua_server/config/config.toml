@@ -1,0 +1,5 @@
+# OPC UA Server Configuration
+
+[api]
+# Port for the hot-reload REST API
+port = 9090

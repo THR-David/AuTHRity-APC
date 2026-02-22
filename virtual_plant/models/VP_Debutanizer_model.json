@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "name": "VP_Debutanizer",
+    "description": "Virtual Plant - Debutanizer Column (Empty Template)",
+    "version": "1.0",
+    "mode": "parametric"
+  },
+  "tuning": {
+    "prediction_horizon": 30,
+    "control_horizon": 5,
+    "sample_time": 10.0
+  },
+  "variables": {
+    "cvs": [
+      {
+        "name": "Top_C4",
+        "description": "Top Product C4 Composition",
+        "units": "fraction",
+        "weight": 0.0,
+        "alpha": 0.0,
+        "limits": {
+          "low_low": 0.90,
+          "low": 0.92,
+          "target": 0.96,
+          "high": 0.99,
+          "high_high": 1.0
+        }
+      },
+      {
+        "name": "Btm_Temp",
+        "description": "Bottom Temperature",
+        "units": "°C",
+        "weight": 0.0,
+        "alpha": 0.0,
+        "limits": {
+          "low_low": 310.0,
+          "low": 320.0,
+          "target": 340.0,
+          "high": 360.0,
+          "high_high": 370.0
+        }
+      }
+    ],
+    "mvs": [
+      {
+        "name": "Reflux",
+        "description": "Reflux Flow Rate",
+        "units": "m3/h",
+        "max_move": 0.0,
+        "limits": {
+          "low": 50.0,
+          "target": 100.0,
+          "high": 150.0
+        }
+      },
+      {
+        "name": "Steam",
+        "description": "Reboiler Steam Flow Rate",
+        "units": "m3/h",
+        "max_move": 0.0,
+        "limits": {
+          "low": 100.0,
+          "target": 135.0,
+          "high": 180.0
+        }
+      }
+    ],
+    "dvs": [
+      {
+        "name": "Feed_Flow",
+        "description": "Column Feed Flow Rate",
+        "units": "m3/h",
+        "limits": {
+          "low": 100.0,
+          "high": 200.0
+        }
+      }
+    ]
+  },
+  "physics": {
+    "gain": [],
+    "tau": [],
+    "deadTime": [],
+    "gainDv": [],
+    "tauDv": [],
+    "deadTimeDv": []
+  }
+}

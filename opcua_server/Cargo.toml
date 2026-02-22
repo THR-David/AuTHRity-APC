@@ -1,0 +1,26 @@
+[package]
+name = "authrity-opcua-server"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[dependencies]
+# OPC-UA crate (enable server feature)
+async-opcua = { version = "0.17", features = ["server"] }
+
+# Async runtime and logging used by the examples
+tokio = { version = "1", features = ["full"] }
+env_logger = "0.10"
+log = "0.4"
+
+# YAML parsing for node imports
+serde = { version = "1.0", features = ["derive"] }
+serde_yaml = "0.9"
+toml = "0.8"
+
+# Web API for Hot Reload
+axum = { version = "0.7", features = ["multipart"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "fs", "limit"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+

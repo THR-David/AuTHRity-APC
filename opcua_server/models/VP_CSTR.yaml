@@ -1,0 +1,229 @@
+nodes:
+  # --- SYSTEM: VP_CSTR ---
+  - nodeId: "VP_CSTR:ControlNodes"
+    nodeClass: "Object"
+    browseName: "VP_CSTR:ControlNodes"
+
+  - nodeId: "VP_CSTR:OperatingMode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_CSTR:Heartbeat"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_CSTR:NextRun"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_CSTR:ExecutionTimeMs"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "VP_CSTR:SolverStatus"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_CSTR:ObjectiveFunction"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "VP_CSTR:ModelSelect"
+    nodeClass: "Variable"
+    dataType: "String"
+    initialValue: ""
+    comment: "Write model filename to trigger hot-swap (e.g., 'Batman_v2_model.json')"
+  - nodeId: "VP_CSTR:AvailableModels"
+    nodeClass: "Variable"
+    dataType: "StringArray"
+    initialValue: []
+    comment: "List of available model files in model directory"
+  - nodeId: "VP_CSTR:ConfigurationStatus"
+    nodeClass: "Variable"
+    dataType: "String"
+    initialValue: ""
+    comment: "Status messages from model loading and configuration changes"
+  - nodeId: "VP_CSTR:SaveConfiguration"
+    nodeClass: "Variable"
+    dataType: "Boolean"
+    initialValue: false
+    comment: "Write true to export current parameters to new JSON model file"
+
+  # CV: CSTR_Temp
+  - nodeId: "CSTR_Temp"
+    nodeClass: "Object"
+    description: "Reactor Internal Temperature"
+  - nodeId: "CSTR_Temp:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Temp:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 311
+  - nodeId: "CSTR_Temp:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 300
+  - nodeId: "CSTR_Temp:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 320
+  - nodeId: "CSTR_Temp:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 290
+  - nodeId: "CSTR_Temp:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 330
+  - nodeId: "CSTR_Temp:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Temp:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Temp:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Temp:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Temp:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  # CV: CSTR_Conc
+  - nodeId: "CSTR_Conc"
+    nodeClass: "Object"
+    description: "Concentration of Reactant A"
+  - nodeId: "CSTR_Conc:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Conc:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.5
+  - nodeId: "CSTR_Conc:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Conc:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 10
+  - nodeId: "CSTR_Conc:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Conc:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12
+  - nodeId: "CSTR_Conc:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Conc:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Conc:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Conc:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Conc:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  # MV: CSTR_Cooling
+  - nodeId: "CSTR_Cooling"
+    nodeClass: "Object"
+    description: "Cooling Jacket Temperature Setpoint"
+  - nodeId: "CSTR_Cooling:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Cooling:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Cooling:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Cooling:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 280
+  - nodeId: "CSTR_Cooling:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 310
+  - nodeId: "CSTR_Cooling:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Cooling:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 100
+  - nodeId: "CSTR_Cooling:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+    comment: "Generic MPC Mode: 0=Operator, 1=Auto, 2=Cascade, 3=RemoteCascade (DCS adapter translates native modes)"
+  - nodeId: "CSTR_Cooling:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+    comment: "Generic MPC ModeTarget: Operator requested mode (DCS adapter translates)"
+  - nodeId: "CSTR_Cooling:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Cooling:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Cooling:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "CSTR_Cooling:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  # DV: CSTR_Feed
+  - nodeId: "CSTR_Feed"
+    nodeClass: "Object"
+    description: "Feed Flow Rate"
+  - nodeId: "CSTR_Feed:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Feed:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "CSTR_Feed:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12
+  - nodeId: "CSTR_Feed:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+

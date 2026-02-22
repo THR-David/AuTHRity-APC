@@ -1,0 +1,77 @@
+{
+  "metadata": {
+    "name": "VP_CSTR",
+    "description": "Virtual Plant - CSTR Exothermic Reactor (Empty Template)",
+    "version": "1.0",
+    "mode": "parametric"
+  },
+  "tuning": {
+    "prediction_horizon": 30,
+    "control_horizon": 5,
+    "sample_time": 10.0
+  },
+  "variables": {
+    "cvs": [
+      {
+        "name": "CSTR_Temp",
+        "description": "Reactor Internal Temperature",
+        "units": "K",
+        "weight": 0.0,
+        "alpha": 0.0,
+        "limits": {
+          "low_low": 290.0,
+          "low": 300.0,
+          "target": 311.0,
+          "high": 320.0,
+          "high_high": 330.0
+        }
+      },
+      {
+        "name": "CSTR_Conc",
+        "description": "Concentration of Reactant A",
+        "units": "kmol/m3",
+        "weight": 0.0,
+        "alpha": 0.0,
+        "limits": {
+          "low_low": 0.0,
+          "low": 0.0,
+          "target": 8.5,
+          "high": 10.0,
+          "high_high": 12.0
+        }
+      }
+    ],
+    "mvs": [
+      {
+        "name": "CSTR_Cooling",
+        "description": "Cooling Jacket Temperature Setpoint",
+        "units": "K",
+        "max_move": 0.0,
+        "limits": {
+          "low": 280.0,
+          "target": 300.0,
+          "high": 310.0
+        }
+      }
+    ],
+    "dvs": [
+      {
+        "name": "CSTR_Feed",
+        "description": "Feed Flow Rate",
+        "units": "m3/h",
+        "limits": {
+          "low": 0.0,
+          "high": 12.0
+        }
+      }
+    ]
+  },
+  "physics": {
+    "gain": [],
+    "tau": [],
+    "deadTime": [],
+    "gainDv": [],
+    "tauDv": [],
+    "deadTimeDv": []
+  }
+}
