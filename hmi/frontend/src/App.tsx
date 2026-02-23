@@ -94,13 +94,26 @@ function App() {
   // 1. CONFIG LOAD (YAML Structure Inference)
   useEffect(() => {
         if (!authenticated) return;
-    if (activeModel === "Generator" || activeModel === "Plant Overview") return;
+    if (activeModel === "Generator" || activeModel === "Plant Overview") {
+        setSystemPrefix("");
+        setConfigLoaded(true);
+        return;
+    }
+
+    const controller = new AbortController();
+    const selectedModel = activeModel;
 
     setConfigLoaded(false);
+    setSystemPrefix("");
+    setCvList([]);
+    setMvList([]);
+    setDvList([]);
+    setDescriptions({});
 
-    fetch(`/api/model?file=${activeModel}`)
+    fetch(`/api/model?file=${selectedModel}`, { signal: controller.signal })
       .then(res => res.json())
       .then((data: ModelConfig) => {
+        if (controller.signal.aborted) return;
         const nodes = data.nodes;
         
         // Find system prefix (e.g., "CSTR_DMC", "Debutanizer_DMC")
@@ -157,13 +170,19 @@ function App() {
         setMvList(detectedMVs);
         setDvList(detectedDVs); // <--- 3. Set State
         setDescriptions(descriptionsMap);
-        setConfigLoaded(true);
+                setConfigLoaded(true);
       })
       .catch(err => {
+                    if (controller.signal.aborted) return;
           console.error("Failed to load config:", err);
+                    setSystemPrefix("");
           setConfigLoaded(true);
       });
-    }, [activeModel, authenticated]);
+
+        return () => {
+            controller.abort();
+        };
+        }, [activeModel, authenticated]);
 
   // 2. WEBSOCKET
   useEffect(() => {
@@ -291,6 +310,7 @@ function App() {
 
   const handleToggleMode = (isCalc: boolean, isControl: boolean) => {
       if (!hasRoleAtLeast(role, 'operator')) return;
+      if (!systemPrefix) return;
       let newMode = 0;
       if (isCalc && !isControl) newMode = 1;
       if (isCalc && isControl) newMode = 2;
@@ -463,7 +483,7 @@ function App() {
                                 else handleToggleMode(true, controlEnable);
                             }} 
                             colorOn="bg-blue-500"
-                            disabled={!canOperate}
+                            disabled={!canOperate || !systemPrefix}
                         />
                         <div className="w-px h-8 bg-slate-700/50"></div>
                         <ToggleSwitch 
@@ -474,7 +494,7 @@ function App() {
                                 else handleToggleMode(calcOn, false);
                             }} 
                             colorOn="bg-emerald-500"
-                            disabled={!canOperate}
+                            disabled={!canOperate || !systemPrefix}
                         />
                     </div>
                 </div>
@@ -554,7 +574,7 @@ function App() {
                     )}
                     {activeTab === "Models" && (
                         <div className="animate-in fade-in duration-300">
-                            <ModelsTab />
+                            <ModelsTab controllerId={systemPrefix} />
                         </div>
                     )}
                     {activeTab === "Tuning" && (

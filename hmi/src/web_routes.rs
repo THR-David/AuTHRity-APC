@@ -45,6 +45,11 @@ pub struct AuditQuery {
     pub actor: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ControllerModelQuery {
+    pub controller_id: Option<String>,
+}
+
 pub async fn list_audit_admin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -559,6 +564,7 @@ pub async fn get_remote_physics(
 pub async fn get_controller_model(
     State(state): State<AppState>,
     user: CurrentUser,
+    Query(query): Query<ControllerModelQuery>,
 ) -> impl IntoResponse {
     if let Err(e) = user.require(Permission::ReadView) {
         return e.into_response();
@@ -570,46 +576,64 @@ pub async fn get_controller_model(
 
     let client = Client::new();
     
-    // First, list controllers to find the active one
+    // First, list controllers to find a running target
     let list_url = format!("{}/api/controllers", target_sup);
     
     match client.get(&list_url).header("x-api-key", &api_key).send().await {
         Ok(resp) if resp.status().is_success() => {
             if let Ok(controllers) = resp.json::<Vec<serde_json::Value>>().await {
-                // Find the first running controller (state can be "Stopped" or {"Running": uptime})
-                if let Some(active) = controllers.iter().find(|c| {
+                let requested_id = query.controller_id.as_deref().map(str::trim).filter(|s| !s.is_empty());
+
+                let is_running = |c: &&serde_json::Value| {
                     c.get("state").map(|s| s.is_object()).unwrap_or(false)
-                }) {
-                    if let Some(id) = active.get("id").and_then(|i| i.as_str()) {
-                        if let Some(active_model) = active.get("active_model").and_then(|m| m.as_str()) {
-                            // Use the models endpoint which handles subdirectories correctly
-                            let model_url = format!("{}/api/controllers/{}/models/{}", target_sup, id, active_model);
-                            println!("🔍 Fetching active model from: {}", model_url);
-                            
-                            match client.get(&model_url).header("x-api-key", &api_key).send().await {
-                                Ok(model_resp) if model_resp.status().is_success() => {
-                                    if let Ok(model_json) = model_resp.text().await {
-                                        return (
-                                            [(axum::http::header::CONTENT_TYPE, "application/json")],
-                                            model_json
-                                        ).into_response();
-                                    }
+                };
+
+                let target = if let Some(controller_id) = requested_id {
+                    controllers.iter().find(|c| c.get("id").and_then(|i| i.as_str()) == Some(controller_id))
+                } else {
+                    controllers.iter().find(is_running)
+                };
+
+                let Some(controller) = target else {
+                    if let Some(controller_id) = requested_id {
+                        return (StatusCode::NOT_FOUND, format!("Controller '{}' not found", controller_id)).into_response();
+                    }
+                    return (StatusCode::NOT_FOUND, "No active controller found").into_response();
+                };
+
+                if !is_running(&controller) {
+                    let controller_id = controller.get("id").and_then(|i| i.as_str()).unwrap_or("unknown");
+                    return (StatusCode::NOT_FOUND, format!("Controller '{}' is not running", controller_id)).into_response();
+                }
+
+                if let Some(id) = controller.get("id").and_then(|i| i.as_str()) {
+                    if let Some(active_model) = controller.get("active_model").and_then(|m| m.as_str()) {
+                        // Use the models endpoint which handles subdirectories correctly
+                        let model_url = format!("{}/api/controllers/{}/models/{}", target_sup, id, active_model);
+                        println!("🔍 Fetching active model from: {}", model_url);
+
+                        match client.get(&model_url).header("x-api-key", &api_key).send().await {
+                            Ok(model_resp) if model_resp.status().is_success() => {
+                                if let Ok(model_json) = model_resp.text().await {
+                                    return (
+                                        [(axum::http::header::CONTENT_TYPE, "application/json")],
+                                        model_json
+                                    ).into_response();
                                 }
-                                Err(e) => {
-                                    println!("⚠️ Failed to fetch model: {}", e);
-                                    return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch model: {}", e)).into_response();
-                                }
-                                Ok(r) => {
-                                    println!("⚠️ Model fetch failed: {}", r.status());
-                                    return (StatusCode::BAD_GATEWAY, format!("Failed to fetch model from supervisor: {}", r.status())).into_response();
-                                }
+                            }
+                            Err(e) => {
+                                println!("⚠️ Failed to fetch model: {}", e);
+                                return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch model: {}", e)).into_response();
+                            }
+                            Ok(r) => {
+                                println!("⚠️ Model fetch failed: {}", r.status());
+                                return (StatusCode::BAD_GATEWAY, format!("Failed to fetch model from supervisor: {}", r.status())).into_response();
                             }
                         }
                     }
                 }
                 
-                // No running controller found
-                return (StatusCode::NOT_FOUND, "No active controller found").into_response();
+                return (StatusCode::NOT_FOUND, "No active model found for controller").into_response();
             }
         }
         Err(e) => {

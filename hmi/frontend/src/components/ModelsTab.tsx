@@ -82,7 +82,11 @@ interface SelectedCell {
   chartData: Array<{ time: number; gain: number }>;
 }
 
-export const ModelsTab: React.FC = () => {
+interface ModelsTabProps {
+  controllerId: string;
+}
+
+export const ModelsTab: React.FC<ModelsTabProps> = ({ controllerId }) => {
   const [model, setModel] = useState<PhysicsModel | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -94,11 +98,19 @@ export const ModelsTab: React.FC = () => {
   const fetchModel = async () => {
     setLoading(true);
     setError(null);
+    setModel(null);
+
+    if (!controllerId) {
+      setError('No selected controller');
+      setLoading(false);
+      return;
+    }
+
     try {
-      const response = await fetch('/api/controller/model');
+      const response = await fetch(`/api/controller/model?controller_id=${encodeURIComponent(controllerId)}`);
       if (!response.ok) {
         if (response.status === 404) {
-          throw new Error('No active controller found');
+          throw new Error(`No running controller for ${controllerId}`);
         }
         throw new Error(`Failed to fetch model: ${response.status}`);
       }
@@ -114,7 +126,7 @@ export const ModelsTab: React.FC = () => {
 
   useEffect(() => {
     fetchModel();
-  }, []);
+  }, [controllerId]);
 
   if (loading) {
     return (
