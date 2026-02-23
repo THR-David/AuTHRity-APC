@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path as StdPath, PathBuf},
     sync::{Arc, Mutex},
     process::{Command, Stdio},
     fs::File,
@@ -424,6 +424,36 @@ async fn stop_controller(
 use axum::extract::Multipart;
 use std::io::Write;
 
+fn next_available_filename(folder_path: &StdPath, requested_filename: &str) -> String {
+    let requested_path = StdPath::new(requested_filename);
+    let stem = requested_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("model");
+    let ext = requested_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| format!(".{}", e))
+        .unwrap_or_default();
+
+    let clean_stem = if stem.is_empty() { "model" } else { stem };
+    let timestamp = Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let initial_candidate = format!("{}_{}{}", clean_stem, timestamp, ext);
+
+    if !folder_path.join(&initial_candidate).exists() {
+        return initial_candidate;
+    }
+
+    let mut idx: u32 = 1;
+    loop {
+        let candidate = format!("{}_{}_{}{}", clean_stem, timestamp, idx, ext);
+        if !folder_path.join(&candidate).exists() {
+            return candidate;
+        }
+        idx += 1;
+    }
+}
+
 async fn deploy_model(
     State(state): State<AppState>,
     mut multipart: Multipart,
@@ -432,7 +462,11 @@ async fn deploy_model(
         let name = field.name().unwrap().to_string();
         
         if name == "file" {
-            let filename = field.file_name().unwrap_or("model.json").to_string();
+            let filename = field
+                .file_name()
+                .and_then(|f| StdPath::new(f).file_name().and_then(|n| n.to_str()))
+                .unwrap_or("model.json")
+                .to_string();
             // Read all bytes into memory to parse metadata
             let data = match field.bytes().await {
                 Ok(b) => b,
@@ -468,7 +502,18 @@ async fn deploy_model(
                 }
             }
             
-            let dest_path = folder_path.join(&filename);
+            let safe_filename = filename
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-' || *c == '.')
+                .collect::<String>();
+            let requested_filename = if safe_filename.is_empty() {
+                "model.json".to_string()
+            } else {
+                safe_filename
+            };
+
+            let final_filename = next_available_filename(&folder_path, &requested_filename);
+            let dest_path = folder_path.join(&final_filename);
             info!("Deploying model to {:?}", dest_path);
             
             if let Ok(mut file) = std::fs::File::create(dest_path) {
@@ -478,6 +523,8 @@ async fn deploy_model(
             } else {
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to create file").into_response();
             }
+
+            return (StatusCode::OK, format!("Deployed as {}", final_filename)).into_response();
         }
     }
     

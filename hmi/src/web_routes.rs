@@ -311,33 +311,6 @@ pub async fn deploy_bundle(
             Ok(res) => return (StatusCode::BAD_GATEWAY, format!("Supervisor rejected: {}", res.status())).into_response(),
             Err(e) => return (StatusCode::BAD_GATEWAY, format!("Supervisor unreachable: {}", e)).into_response(),
         }
-        
-        // 1b. Trigger Start/Restart (Only if we pushed a new controller model)
-        // First, try stop (ignore error if not running)
-        let stop_url = format!("{}/api/controllers/{}/stop", target_supervisor, model_name);
-        let _ = client.post(&stop_url).header("x-api-key", &state.settings.services.supervisor_api_key).send().await;
-        
-        // Now Start
-        let start_url = format!("{}/api/controllers/{}/start", target_supervisor, model_name);
-        
-        let connection_url = if !target_opc_tcp.is_empty() { target_opc_tcp.clone() } else { target_opc.clone() };
-
-        let start_payload = serde_json::json!({
-            "opc_url": connection_url 
-        });
-
-        println!("⚡ Starting Controller on {} connected to {}...", target_supervisor, connection_url);
-
-        match client.post(&start_url)
-            .header("x-api-key", &state.settings.services.supervisor_api_key)
-            .json(&start_payload)
-            .send()
-            .await
-        {
-            Ok(res) if res.status().is_success() => println!("      ✅ Controller Started Successfully"),
-            Ok(res) => println!("      ⚠️ Controller Start Warn: {}", res.status()),
-            Err(e) => println!("      ❌ Controller Start Failed: {}", e),
-        }
     }
 
     // 2. Push YAML to Connectivity (opcua_server)

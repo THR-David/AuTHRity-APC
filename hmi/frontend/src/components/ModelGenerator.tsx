@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_MODEL, type CvOptimizationMode, type FullModel, type MvOptimizationMode, type VarConfig } from '../types/ModelConfig';
-import { Save, Upload, Download, Plus, Trash2, Activity, FileText, CheckCircle, AlertCircle, ArrowDown, ArrowUp, Server, Network, Rocket, RefreshCw } from 'lucide-react';
+import { Save, Upload, Download, Plus, Trash2, Activity, FileText, CheckCircle, ArrowDown, ArrowUp, Server, Network, Rocket, RefreshCw } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MatrixEditor } from './MatrixEditor';
 import StepResponseTool from './StepResponseTool';
@@ -35,6 +35,34 @@ export const ModelGenerator = () => {
     const [showModelLoadModal, setShowModelLoadModal] = useState(false);
     const [controllers, setControllers] = useState<Array<{id: string, models: string[], active_model?: string, state: any}>>([]);
     const [loadingControllers, setLoadingControllers] = useState(false);
+    const [showCvGuide, setShowCvGuide] = useState(false);
+    const [showMvGuide, setShowMvGuide] = useState(false);
+    const [showDvGuide, setShowDvGuide] = useState(false);
+
+    const cvFieldHelp = [
+        { key: "Tag", text: "Node base name used to generate PV/Target/Prediction tags." },
+        { key: "Description", text: "Operator-friendly label shown in tables and exports." },
+        { key: "Units", text: "Engineering units for display and interpretation." },
+        { key: "Weight", text: "Higher value increases priority to reduce this CV error." },
+        { key: "Alpha", text: "Reference trajectory factor, usually 0.0–1.0 (typical 0.7–0.95): lower is faster, higher is smoother." },
+        { key: "Mode", text: "Target/Zone/Maximize/Minimize objective behavior for this CV." },
+        { key: "ECE", text: "CV normalization factor. Default is 1; larger value lowers that CV's relative priority." },
+        { key: "Limits", text: "Operating and safety envelope used by optimization constraints." },
+    ];
+
+    const mvFieldHelp = [
+        { key: "R-Wt", text: "Move suppression cost; higher means less aggressive MV movement." },
+        { key: "MaxMove", text: "Maximum MV change allowed per control interval." },
+        { key: "Mode", text: "Target/Maximize/Minimize objective behavior for this MV." },
+        { key: "Target", text: "Optional economic MV target value." },
+        { key: "Tgt Wt", text: "MV target tracking weight; zero disables MV target pull." },
+        { key: "Limits", text: "Allowed operating bounds enforced by the solver." },
+    ];
+
+    const dvFieldHelp = [
+        { key: "Tag", text: "Measured disturbance name mapped to DV:PV node." },
+        { key: "Limits", text: "Expected range used for validation and warning checks." },
+    ];
 
     const parseCvOptimizationMode = (rawMode: any): CvOptimizationMode => {
         if (!rawMode) return "target";
@@ -286,7 +314,8 @@ export const ModelGenerator = () => {
                     tssMin: (raw.tuning?.prediction_horizon * (raw.sample_time || raw.tuning?.sample_time || 20)) / 60 || 20, 
                     controlHorizon: raw.tuning?.control_horizon ?? 10,
                     solverTol: raw.tuning?.solver_tolerance ?? 0.0001,
-                    maxIter: raw.tuning?.max_iterations ?? 50
+                    maxIter: raw.tuning?.max_iterations ?? 50,
+                    terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 10
                 },
                 cvs: parseVars(raw.variables?.cvs, 'cv'),
                 mvs: parseVars(raw.variables?.mvs, 'mv'),
@@ -365,7 +394,8 @@ export const ModelGenerator = () => {
                         tssMin: (raw.tuning?.prediction_horizon * (raw.tuning?.sample_time || 20)) / 60 || 20, 
                         controlHorizon: raw.tuning?.control_horizon ?? 10,
                         solverTol: raw.tuning?.solver_tolerance ?? 0.0001,
-                        maxIter: raw.tuning?.max_iterations ?? 50
+                        maxIter: raw.tuning?.max_iterations ?? 50,
+                        terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 10
                     },
                     cvs: parseVars(raw.variables?.cvs, 'cv'),
                     mvs: parseVars(raw.variables?.mvs, 'mv'),
@@ -817,7 +847,8 @@ export const ModelGenerator = () => {
                 control_horizon: model.tuning.controlHorizon,
                 sample_time: model.tuning.sampleTime,
                 solver_tolerance: model.tuning.solverTol,
-                max_iterations: model.tuning.maxIter
+                max_iterations: model.tuning.maxIter,
+                terminal_weight_factor: model.tuning.terminalWeightFactor
             },
             variables: {
                 cvs: model.cvs.map(cv => ({
@@ -910,13 +941,18 @@ export const ModelGenerator = () => {
 
     // --- GENERATOR: DIRECT DEPLOY ---
     const handleDirectDeploy = async (mode: 'nodes' | 'controller') => {
-        if (!selectedSup || !selectedOpc) {
-            setDeployStatus("❌ Please select target servers.");
+        if (mode === 'controller' && !selectedSup) {
+            setDeployStatus("❌ Please select a target supervisor.");
+            return;
+        }
+        if (mode === 'nodes' && !selectedOpc) {
+            setDeployStatus("❌ Please select a target OPC server.");
             return;
         }
 
         setIsDeploying(true);
-        setDeployStatus(`⏳ Packing ${mode}...`);
+        const modeLabel = mode === 'controller' ? 'Controller' : 'Nodes';
+        setDeployStatus(`⏳ Packing ${modeLabel}...`);
 
         const formData = new FormData();
         
@@ -943,7 +979,7 @@ export const ModelGenerator = () => {
             formData.append("nodes_yaml", yamlBlob, `${model.meta.name || "Model"}_nodes.yaml`);
         }
 
-        setDeployStatus(`🚀 Sending ${mode}...`);
+        setDeployStatus(`🚀 Sending ${modeLabel}...`);
 
         try {
             const response = await apiFetch("/api/deploy", {
@@ -1056,6 +1092,27 @@ export const ModelGenerator = () => {
                                 };
                                 updateMatrixSize([...model.cvs, newCV], model.mvs, model.dvs);
                             }} className="p-1 bg-emerald-500/20 text-emerald-400 rounded"><Plus size={16}/></button></div>
+                            <div className="mb-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowCvGuide(prev => !prev)}
+                                    className="w-full flex items-center justify-between px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-lg text-left hover:border-slate-700 transition"
+                                >
+                                    <span className="text-[10px] uppercase text-slate-500 font-bold">Quick Field Guide (CV)</span>
+                                    <span className="text-xs text-slate-400">{showCvGuide ? 'Hide' : 'Show'}</span>
+                                </button>
+                                {showCvGuide && (
+                                    <div className="mt-2 p-3 bg-slate-950/60 border border-slate-800 rounded-lg">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                            {cvFieldHelp.map(item => (
+                                                <p key={item.key} className="text-[11px] text-slate-400">
+                                                    <span className="text-slate-300 font-semibold">{item.key}:</span> {item.text}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             <table className="w-full text-left text-xs">
                                 <thead>
                                     <tr className="text-slate-500 border-b border-slate-800">
@@ -1125,6 +1182,27 @@ export const ModelGenerator = () => {
                         {/* MVs TABLE */}
                         <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 overflow-x-auto">
                             <div className="flex justify-between mb-4"><h3 className="font-bold text-amber-300">Manipulated Variables (MVs)</h3> <button onClick={() => updateMatrixSize(model.cvs, [...model.mvs, { id: Date.now().toString(), name: `MV${model.mvs.length+1}`, desc: "", units: "", weight: 1, maxMove: 5, mvOptimizationMode: "target", limits: {low:0, high:100, lowLow:0, highHigh:100}, target: undefined, targetWeight: 0 }], model.dvs)} className="p-1 bg-emerald-500/20 text-emerald-400 rounded"><Plus size={16}/></button></div>
+                            <div className="mb-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMvGuide(prev => !prev)}
+                                    className="w-full flex items-center justify-between px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-lg text-left hover:border-slate-700 transition"
+                                >
+                                    <span className="text-[10px] uppercase text-slate-500 font-bold">Quick Field Guide (MV)</span>
+                                    <span className="text-xs text-slate-400">{showMvGuide ? 'Hide' : 'Show'}</span>
+                                </button>
+                                {showMvGuide && (
+                                    <div className="mt-2 p-3 bg-slate-950/60 border border-slate-800 rounded-lg">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                            {mvFieldHelp.map(item => (
+                                                <p key={item.key} className="text-[11px] text-slate-400">
+                                                    <span className="text-slate-300 font-semibold">{item.key}:</span> {item.text}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                             <table className="w-full text-left text-xs">
                                 <thead>
                                     <tr className="text-slate-500 border-b border-slate-800">
@@ -1186,6 +1264,27 @@ export const ModelGenerator = () => {
                             <div className="flex justify-between mb-4">
                                 <h3 className="font-bold text-pink-300">Disturbance Variables (DVs)</h3> 
                                 <button onClick={() => updateMatrixSize(model.cvs, model.mvs, [...model.dvs, { id: Date.now().toString(), name: `DV${model.dvs.length+1}`, desc: "", units: "", weight: 0, limits: {low:0, high:100, lowLow:0, highHigh:100} }])} className="p-1 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"><Plus size={16}/></button>
+                            </div>
+                            <div className="mb-4">
+                                <button
+                                    type="button"
+                                    onClick={() => setShowDvGuide(prev => !prev)}
+                                    className="w-full flex items-center justify-between px-3 py-2 bg-slate-950/60 border border-slate-800 rounded-lg text-left hover:border-slate-700 transition"
+                                >
+                                    <span className="text-[10px] uppercase text-slate-500 font-bold">Quick Field Guide (DV)</span>
+                                    <span className="text-xs text-slate-400">{showDvGuide ? 'Hide' : 'Show'}</span>
+                                </button>
+                                {showDvGuide && (
+                                    <div className="mt-2 p-3 bg-slate-950/60 border border-slate-800 rounded-lg">
+                                        <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                            {dvFieldHelp.map(item => (
+                                                <p key={item.key} className="text-[11px] text-slate-400">
+                                                    <span className="text-slate-300 font-semibold">{item.key}:</span> {item.text}
+                                                </p>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                             <table className="w-full text-left text-xs">
                                 <thead>
@@ -1443,24 +1542,24 @@ export const ModelGenerator = () => {
                         <div className="grid grid-cols-2 gap-6">
                             <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Solver Tolerance</label><p className="text-[10px] text-slate-600 mb-1">Stop when error &lt; value</p><input type="number" step="0.00001" value={model.tuning.solverTol} onChange={e => setModel({...model, tuning: {...model.tuning, solverTol: parseFloat(e.target.value)}})} className={numInputClass}/></div>
                             <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Max Iterations</label><p className="text-[10px] text-slate-600 mb-1">Safety stop to prevent infinite loops</p><input type="number" value={model.tuning.maxIter} onChange={e => setModel({...model, tuning: {...model.tuning, maxIter: parseFloat(e.target.value)}})} className={numInputClass}/></div>
+                            <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Terminal Weight Factor</label><p className="text-[10px] text-slate-600 mb-1">Multiplier on last prediction step weight</p><input type="number" step="0.1" value={model.tuning.terminalWeightFactor} onChange={e => setModel({...model, tuning: {...model.tuning, terminalWeightFactor: parseFloat(e.target.value)}})} className={numInputClass}/></div>
                         </div>
                      </div>
                 )}
 
                 {activeTab === "Export" && (
                     <div className="space-y-6 max-w-2xl">
-                        
-                        
+
                         {/* 1. DIRECT DEPLOy */}
                         <div className="bg-slate-900/50 p-6 rounded-xl border-2 border-emerald-600/30 overflow-hidden shadow-lg relative">
                              <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500"></div>
                              <div className="flex justify-between items-start mb-4">
                                 <div>
                                     <h3 className="font-bold text-white text-xl flex items-center gap-2">
-                                        <Rocket className="text-emerald-400" /> Direct Deployment
+                                        <Rocket className="text-emerald-400" /> Direct Push
                                     </h3>
                                     <p className="text-sm text-slate-400 mt-1">
-                                        Push this configuration directly to the live controllers.
+                                        Push files to controller host / OPC server. This does not start or stop controllers.
                                     </p>
                                 </div>
                              </div>
@@ -1522,7 +1621,7 @@ export const ModelGenerator = () => {
                                     ) : (
                                         <Rocket size={18} />
                                     )}
-                                    Deploy Controller (.json)
+                                    Push Model (.json)
                                 </button>
                              </div>
 

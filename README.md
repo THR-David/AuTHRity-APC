@@ -68,6 +68,9 @@ Live screenshots from local runs:
 ### Model Generator (Visualization)
 ![Generator Visualization](assets/generator%20visuallize.png)
 
+### Prediction & Control Horizon (Pass Balancing)
+![Prediction and Control Horizon](assets/prediction_control.png)
+
 ### Step Response Workflow
 ![Model Step Response](assets/model%20step%20response.png)
 

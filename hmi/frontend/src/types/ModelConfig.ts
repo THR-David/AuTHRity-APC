@@ -43,6 +43,7 @@ export interface TuningConfig {
     controlHorizon: number; // Nu
     solverTol: number;
     maxIter: number;
+    terminalWeightFactor: number;
 }
 
 export interface FullModel {
@@ -89,6 +90,7 @@ export const DEFAULT_MODEL: FullModel = {
         tssMin: 20,
         controlHorizon: 10,
         solverTol: 0.0001,
-        maxIter: 50
+        maxIter: 50,
+        terminalWeightFactor: 10
     }
 };

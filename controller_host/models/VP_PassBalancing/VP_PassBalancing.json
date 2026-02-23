@@ -10,7 +10,8 @@
     "control_horizon": 20,
     "sample_time": 10,
     "solver_tolerance": 0.0001,
-    "max_iterations": 60
+    "max_iterations": 60,
+    "terminal_weight_factor": 1
   },
   "variables": {
     "cvs": [
@@ -19,7 +20,7 @@
         "description": "Pass 1 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -49,7 +50,7 @@
         "description": "Pass 2 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -79,7 +80,7 @@
         "description": "Pass 3 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -109,7 +110,7 @@
         "description": "Pass 4 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -139,7 +140,7 @@
         "description": "Pass 5 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -169,7 +170,7 @@
         "description": "Pass 6 temperature deviation from average",
         "units": "degC",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
@@ -199,7 +200,7 @@
         "description": "Bias sum",
         "units": "",
         "weight": 1,
-        "alpha": 0,
+        "alpha": 0.7,
         "ece_factor": 1,
         "optimization_mode": {
           "type": "Target",
