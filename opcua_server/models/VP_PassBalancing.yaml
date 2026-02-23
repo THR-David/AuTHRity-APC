@@ -1,0 +1,977 @@
+nodes:
+  # --- SYSTEM: VP_PassBalancing ---
+  - nodeId: "VP_PassBalancing:ControlNodes"
+    nodeClass: "Object"
+    browseName: "VP_PassBalancing:ControlNodes"
+
+  - nodeId: "VP_PassBalancing:OperatingMode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:Heartbeat"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:NextRun"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:ExecutionTimeMs"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:SolverStatus"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:ObjectiveFunction"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0
+  - nodeId: "VP_PassBalancing:ModelSelect"
+    nodeClass: "Variable"
+    dataType: "String"
+    initialValue: ""
+    comment: "Write model filename to trigger hot-swap (e.g., 'Batman_v2_model.json')"
+  - nodeId: "VP_PassBalancing:AvailableModels"
+    nodeClass: "Variable"
+    dataType: "StringArray"
+    initialValue: []
+    comment: "List of available model files in model directory"
+  - nodeId: "VP_PassBalancing:ConfigurationStatus"
+    nodeClass: "Variable"
+    dataType: "String"
+    initialValue: ""
+    comment: "Status messages from model loading and configuration changes"
+  - nodeId: "VP_PassBalancing:SaveConfiguration"
+    nodeClass: "Variable"
+    dataType: "Boolean"
+    initialValue: false
+    comment: "Write true to export current parameters to new JSON model file"
+
+  - nodeId: "PassBalancing:CokeEnable"
+    nodeClass: "Variable"
+    dataType: "Boolean"
+    initialValue: false
+  - nodeId: "PassBalancing:DisturbanceEnable"
+    nodeClass: "Variable"
+    dataType: "Boolean"
+    initialValue: true
+  - nodeId: "PassBalancing:Sum_Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  # CV: Sum_Bias
+  - nodeId: "Sum_Bias"
+    nodeClass: "Object"
+    description: "Aggregate bias sum (DCS-side signal, optional CV for monitoring/penalty)"
+  - nodeId: "Sum_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -5.0
+  - nodeId: "Sum_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 5.0
+  - nodeId: "Sum_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -10.0
+  - nodeId: "Sum_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 10.0
+  - nodeId: "Sum_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Sum_Bias:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  # Master total-flow controller (DCS side)
+  - nodeId: "FlowMaster"
+    nodeClass: "Object"
+    description: "Master total-flow controller"
+  - nodeId: "FlowMaster:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 300.0
+  - nodeId: "FlowMaster:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 300.0
+  - nodeId: "FlowMaster:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FlowMaster:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+
+  # --- RAW TEMPERATURE TAGS (T1..T6) ---
+  - nodeId: "T1"
+    nodeClass: "Object"
+    description: "Pass 1 raw temperature"
+  - nodeId: "T1:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 103.0
+
+  - nodeId: "T2"
+    nodeClass: "Object"
+    description: "Pass 2 raw temperature"
+  - nodeId: "T2:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 102.0
+
+  - nodeId: "T3"
+    nodeClass: "Object"
+    description: "Pass 3 raw temperature"
+  - nodeId: "T3:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 101.0
+
+  - nodeId: "T4"
+    nodeClass: "Object"
+    description: "Pass 4 raw temperature"
+  - nodeId: "T4:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 99.0
+
+  - nodeId: "T5"
+    nodeClass: "Object"
+    description: "Pass 5 raw temperature"
+  - nodeId: "T5:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 98.0
+
+  - nodeId: "T6"
+    nodeClass: "Object"
+    description: "Pass 6 raw temperature"
+  - nodeId: "T6:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 97.0
+
+  # --- DEVIATION CV TAGS (T1_Dev..T6_Dev) ---
+  - nodeId: "T1_Dev"
+    nodeClass: "Object"
+    description: "Pass 1 temperature deviation from average"
+  - nodeId: "T1_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 3.0
+  - nodeId: "T1_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T1_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T1_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T1_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T1_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T1_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T1_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T1_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T1_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T1_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  - nodeId: "T2_Dev"
+    nodeClass: "Object"
+    description: "Pass 2 temperature deviation from average"
+  - nodeId: "T2_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 2.0
+  - nodeId: "T2_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T2_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T2_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T2_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T2_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T2_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T2_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T2_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T2_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T2_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  - nodeId: "T3_Dev"
+    nodeClass: "Object"
+    description: "Pass 3 temperature deviation from average"
+  - nodeId: "T3_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T3_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T3_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T3_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T3_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T3_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T3_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T3_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T3_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T3_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T3_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  - nodeId: "T4_Dev"
+    nodeClass: "Object"
+    description: "Pass 4 temperature deviation from average"
+  - nodeId: "T4_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -1.0
+  - nodeId: "T4_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T4_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T4_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T4_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T4_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T4_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T4_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T4_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T4_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T4_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  - nodeId: "T5_Dev"
+    nodeClass: "Object"
+    description: "Pass 5 temperature deviation from average"
+  - nodeId: "T5_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -2.0
+  - nodeId: "T5_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T5_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T5_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T5_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T5_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T5_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T5_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T5_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T5_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T5_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  - nodeId: "T6_Dev"
+    nodeClass: "Object"
+    description: "Pass 6 temperature deviation from average"
+  - nodeId: "T6_Dev:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -3.0
+  - nodeId: "T6_Dev:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T6_Dev:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -8.0
+  - nodeId: "T6_Dev:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 8.0
+  - nodeId: "T6_Dev:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -12.0
+  - nodeId: "T6_Dev:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 12.0
+  - nodeId: "T6_Dev:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "T6_Dev:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T6_Dev:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T6_Dev:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "T6_Dev:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
+
+  # --- MV BIAS CHANNELS (FC1_Bias..FC6_Bias) ---
+  - nodeId: "FC1_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 1 valve"
+  - nodeId: "FC1_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC1_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC1_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC1_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC1_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC1_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC1_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC1_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC1_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC1_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC1_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC1_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC1_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  - nodeId: "FC2_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 2 valve"
+  - nodeId: "FC2_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC2_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC2_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC2_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC2_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC2_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC2_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC2_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC2_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC2_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC2_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC2_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC2_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  - nodeId: "FC3_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 3 valve"
+  - nodeId: "FC3_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC3_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC3_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC3_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC3_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC3_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC3_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC3_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC3_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC3_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC3_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC3_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC3_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  - nodeId: "FC4_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 4 valve"
+  - nodeId: "FC4_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC4_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC4_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC4_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC4_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC4_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC4_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC4_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC4_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC4_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC4_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC4_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC4_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  - nodeId: "FC5_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 5 valve"
+  - nodeId: "FC5_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC5_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC5_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC5_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC5_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC5_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC5_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC5_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC5_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC5_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC5_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC5_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC5_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  - nodeId: "FC6_Bias"
+    nodeClass: "Object"
+    description: "Bias MV for pass 6 valve"
+  - nodeId: "FC6_Bias:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC6_Bias:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC6_Bias:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC6_Bias:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -15.0
+  - nodeId: "FC6_Bias:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 15.0
+  - nodeId: "FC6_Bias:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: -20.0
+  - nodeId: "FC6_Bias:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 20.0
+  - nodeId: "FC6_Bias:Mode"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC6_Bias:ModeTarget"
+    nodeClass: "Variable"
+    dataType: "Int32"
+    initialValue: 3
+  - nodeId: "FC6_Bias:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "FC6_Bias:LastMove"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC6_Bias:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "FC6_Bias:FuturePlan"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0]
+
+  # --- SLAVE VALVE OUTPUT CHANNELS (FC1..FC6) ---
+  - nodeId: "FC1"
+    nodeClass: "Object"
+    description: "Pass 1 valve/slave controller output"
+  - nodeId: "FC1:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC1:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC1:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass1:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass1:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass1:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  - nodeId: "FC2"
+    nodeClass: "Object"
+    description: "Pass 2 valve/slave controller output"
+  - nodeId: "FC2:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC2:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC2:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass2:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass2:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass2:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  - nodeId: "FC3"
+    nodeClass: "Object"
+    description: "Pass 3 valve/slave controller output"
+  - nodeId: "FC3:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC3:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC3:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass3:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass3:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass3:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  - nodeId: "FC4"
+    nodeClass: "Object"
+    description: "Pass 4 valve/slave controller output"
+  - nodeId: "FC4:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC4:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC4:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass4:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass4:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass4:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  - nodeId: "FC5"
+    nodeClass: "Object"
+    description: "Pass 5 valve/slave controller output"
+  - nodeId: "FC5:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC5:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC5:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass5:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass5:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass5:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+
+  - nodeId: "FC6"
+    nodeClass: "Object"
+    description: "Pass 6 valve/slave controller output"
+  - nodeId: "FC6:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC6:SP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "FC6:OP"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass6:Flow"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 50.0
+  - nodeId: "Pass6:CokeOffset"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "Pass6:CokeRampPerMin"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0

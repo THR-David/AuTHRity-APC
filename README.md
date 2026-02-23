@@ -56,6 +56,9 @@ Live screenshots from local runs:
 ### HMI Overview
 ![AuTHRity HMI Screenshot](assets/HMIscreenshot.png)
 
+### Plant Overview
+![Plant Overview](assets/plant_overview.png)
+
 ### Model Management
 ![Models Overview](assets/models%20overview.png)
 

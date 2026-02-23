@@ -1,0 +1,621 @@
+{
+  "metadata": {
+    "name": "VP_PassBalancing",
+    "description": "Virtual Plant - Pass Balancing (6-pass furnace balancing)",
+    "version": "1.2",
+    "model_type": "parametric"
+  },
+  "tuning": {
+    "prediction_horizon": 30,
+    "control_horizon": 20,
+    "sample_time": 10,
+    "solver_tolerance": 0.0001,
+    "max_iterations": 60
+  },
+  "variables": {
+    "cvs": [
+      {
+        "name": "T1_Dev",
+        "description": "Pass 1 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T1_Dev:PV",
+          "target": "T1_Dev:Target",
+          "prediction": "T1_Dev:Prediction",
+          "limits": {
+            "high": "T1_Dev:HighLimit",
+            "low": "T1_Dev:LowLimit",
+            "hh": "T1_Dev:HighHighLimit",
+            "ll": "T1_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "T2_Dev",
+        "description": "Pass 2 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T2_Dev:PV",
+          "target": "T2_Dev:Target",
+          "prediction": "T2_Dev:Prediction",
+          "limits": {
+            "high": "T2_Dev:HighLimit",
+            "low": "T2_Dev:LowLimit",
+            "hh": "T2_Dev:HighHighLimit",
+            "ll": "T2_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "T3_Dev",
+        "description": "Pass 3 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T3_Dev:PV",
+          "target": "T3_Dev:Target",
+          "prediction": "T3_Dev:Prediction",
+          "limits": {
+            "high": "T3_Dev:HighLimit",
+            "low": "T3_Dev:LowLimit",
+            "hh": "T3_Dev:HighHighLimit",
+            "ll": "T3_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "T4_Dev",
+        "description": "Pass 4 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T4_Dev:PV",
+          "target": "T4_Dev:Target",
+          "prediction": "T4_Dev:Prediction",
+          "limits": {
+            "high": "T4_Dev:HighLimit",
+            "low": "T4_Dev:LowLimit",
+            "hh": "T4_Dev:HighHighLimit",
+            "ll": "T4_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "T5_Dev",
+        "description": "Pass 5 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T5_Dev:PV",
+          "target": "T5_Dev:Target",
+          "prediction": "T5_Dev:Prediction",
+          "limits": {
+            "high": "T5_Dev:HighLimit",
+            "low": "T5_Dev:LowLimit",
+            "hh": "T5_Dev:HighHighLimit",
+            "ll": "T5_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "T6_Dev",
+        "description": "Pass 6 temperature deviation from average",
+        "units": "degC",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -12,
+          "low": -8,
+          "target": 0,
+          "high": 8,
+          "high_high": 12
+        },
+        "node_ids": {
+          "pv": "T6_Dev:PV",
+          "target": "T6_Dev:Target",
+          "prediction": "T6_Dev:Prediction",
+          "limits": {
+            "high": "T6_Dev:HighLimit",
+            "low": "T6_Dev:LowLimit",
+            "hh": "T6_Dev:HighHighLimit",
+            "ll": "T6_Dev:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "Sum_Bias",
+        "description": "Bias sum",
+        "units": "",
+        "weight": 1,
+        "alpha": 0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -5,
+          "low": -1,
+          "target": 0,
+          "high": 1,
+          "high_high": 5
+        },
+        "node_ids": {
+          "pv": "Sum_Bias:PV",
+          "target": "Sum_Bias:Target",
+          "prediction": "Sum_Bias:Prediction",
+          "limits": {
+            "high": "Sum_Bias:HighLimit",
+            "low": "Sum_Bias:LowLimit",
+            "hh": "Sum_Bias:HighHighLimit",
+            "ll": "Sum_Bias:LowLowLimit"
+          }
+        }
+      }
+    ],
+    "mvs": [
+      {
+        "name": "FC1_Bias",
+        "description": "Bias MV for pass 1 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC1_Bias:PV",
+          "sp": "FC1_Bias:SP",
+          "op": "FC1_Bias:OP",
+          "mode": "FC1_Bias:Mode",
+          "mode_target": "FC1_Bias:ModeTarget",
+          "future_plan": "FC1_Bias:FuturePlan",
+          "limits": {
+            "high": "FC1_Bias:HighLimit",
+            "low": "FC1_Bias:LowLimit",
+            "hh": "FC1_Bias:HighHighLimit",
+            "ll": "FC1_Bias:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "FC2_Bias",
+        "description": "Bias MV for pass 2 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC2_Bias:PV",
+          "sp": "FC2_Bias:SP",
+          "op": "FC2_Bias:OP",
+          "mode": "FC2_Bias:Mode",
+          "mode_target": "FC2_Bias:ModeTarget",
+          "future_plan": "FC2_Bias:FuturePlan",
+          "limits": {
+            "high": "FC2_Bias:HighLimit",
+            "low": "FC2_Bias:LowLimit",
+            "hh": "FC2_Bias:HighHighLimit",
+            "ll": "FC2_Bias:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "FC3_Bias",
+        "description": "Bias MV for pass 3 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC3_Bias:PV",
+          "sp": "FC3_Bias:SP",
+          "op": "FC3_Bias:OP",
+          "mode": "FC3_Bias:Mode",
+          "mode_target": "FC3_Bias:ModeTarget",
+          "future_plan": "FC3_Bias:FuturePlan",
+          "limits": {
+            "high": "FC3_Bias:HighLimit",
+            "low": "FC3_Bias:LowLimit",
+            "hh": "FC3_Bias:HighHighLimit",
+            "ll": "FC3_Bias:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "FC4_Bias",
+        "description": "Bias MV for pass 4 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC4_Bias:PV",
+          "sp": "FC4_Bias:SP",
+          "op": "FC4_Bias:OP",
+          "mode": "FC4_Bias:Mode",
+          "mode_target": "FC4_Bias:ModeTarget",
+          "future_plan": "FC4_Bias:FuturePlan",
+          "limits": {
+            "high": "FC4_Bias:HighLimit",
+            "low": "FC4_Bias:LowLimit",
+            "hh": "FC4_Bias:HighHighLimit",
+            "ll": "FC4_Bias:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "FC5_Bias",
+        "description": "Bias MV for pass 5 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC5_Bias:PV",
+          "sp": "FC5_Bias:SP",
+          "op": "FC5_Bias:OP",
+          "mode": "FC5_Bias:Mode",
+          "mode_target": "FC5_Bias:ModeTarget",
+          "future_plan": "FC5_Bias:FuturePlan",
+          "limits": {
+            "high": "FC5_Bias:HighLimit",
+            "low": "FC5_Bias:LowLimit",
+            "hh": "FC5_Bias:HighHighLimit",
+            "ll": "FC5_Bias:LowLowLimit"
+          }
+        }
+      },
+      {
+        "name": "FC6_Bias",
+        "description": "Bias MV for pass 6 valve",
+        "units": "%",
+        "weight_r": 1,
+        "max_move": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": -20,
+          "low": -15,
+          "high": 15,
+          "high_high": 20
+        },
+        "node_ids": {
+          "pv": "FC6_Bias:PV",
+          "sp": "FC6_Bias:SP",
+          "op": "FC6_Bias:OP",
+          "mode": "FC6_Bias:Mode",
+          "mode_target": "FC6_Bias:ModeTarget",
+          "future_plan": "FC6_Bias:FuturePlan",
+          "limits": {
+            "high": "FC6_Bias:HighLimit",
+            "low": "FC6_Bias:LowLimit",
+            "hh": "FC6_Bias:HighHighLimit",
+            "ll": "FC6_Bias:LowLowLimit"
+          }
+        }
+      }
+    ],
+    "dvs": []
+  },
+  "physics": {
+    "gain": [
+      [
+        -1.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      [
+        0.2,
+        -1.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      [
+        0.2,
+        0.2,
+        -1.2,
+        0.2,
+        0.2,
+        0.2
+      ],
+      [
+        0.2,
+        0.2,
+        0.2,
+        -1.2,
+        0.2,
+        0.2
+      ],
+      [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        -1.2,
+        0.2
+      ],
+      [
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+        -1.2
+      ],
+      [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    ],
+    "tau": [
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        80,
+        80,
+        80,
+        80,
+        80,
+        80
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "dead_time": [
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        20,
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    ],
+    "gain_dv": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ],
+    "tau_dv": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ],
+    "dead_time_dv": [
+      [],
+      [],
+      [],
+      [],
+      [],
+      [],
+      []
+    ]
+  }
+}

@@ -38,6 +38,7 @@ pub async fn read_bulk(session: &Session, node_ids: &[NodeId]) -> Result<Vec<f64
             Some(Variant::Double(v)) => *v,
             Some(Variant::Float(v)) => *v as f64,
             Some(Variant::Int32(v)) => *v as f64, // Added Int32 support just in case
+            Some(Variant::Boolean(v)) => if *v { 1.0 } else { 0.0 },
             _ => return Err(anyhow!("Node {:?} is not a number. Got: {:?}", node_ids[i], val.value)),
         };
         values.push(float_val);

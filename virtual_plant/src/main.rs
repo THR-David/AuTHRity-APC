@@ -16,6 +16,7 @@ use opcua::{
 
 use plant::debutanizer::{DebutanizerModel, ColumnConfig, ModelInputs, MW, DENSITY};
 use plant::cstr::{CSTRModel, CSTRInputs};
+use plant::pass_balancing::{PassBalancingConfig, PassBalancingInputs, PassBalancingModel};
 use config::{AppSettings, AuthMode};
 
 // --- NODE NAME CONSTANTS ---
@@ -41,6 +42,14 @@ const NODE_CSTR_COOLING_MODE: &str = "CSTR_Cooling:Mode";
 const NODE_CSTR_FEED_DV: &str    = "CSTR_Feed:PV";    
 const NODE_CSTR_TEMP_CV: &str    = "CSTR_Temp:PV";    
 const NODE_CSTR_CONC_CV: &str    = "CSTR_Conc:PV"; 
+
+// VP_PassBalancing Nodes
+const NODE_FLOW_MASTER_OP: &str = "FlowMaster:OP";
+const NODE_FLOW_MASTER_SP: &str = "FlowMaster:SP";
+const NODE_FLOW_MASTER_PV: &str = "FlowMaster:PV";
+const NODE_COKE_ENABLE: &str = "PassBalancing:CokeEnable";
+const NODE_SUM_BIAS: &str = "PassBalancing:Sum_Bias";
+const NODE_SUM_BIAS_CV_PV: &str = "Sum_Bias:PV";
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -118,6 +127,44 @@ async fn main() -> Result<()> {
     let write_cstr_cool_pv = NodeId::new(namespace, NODE_CSTR_COOLING_PV);
     let write_cstr_cool_op = NodeId::new(namespace, NODE_CSTR_COOLING_OP);
 
+    let node_flow_master_op = NodeId::new(namespace, NODE_FLOW_MASTER_OP);
+    let node_flow_master_sp = NodeId::new(namespace, NODE_FLOW_MASTER_SP);
+    let write_flow_master_pv = NodeId::new(namespace, NODE_FLOW_MASTER_PV);
+    let node_coke_enable = NodeId::new(namespace, NODE_COKE_ENABLE);
+    let write_sum_bias = NodeId::new(namespace, NODE_SUM_BIAS);
+    let write_sum_bias_cv_pv = NodeId::new(namespace, NODE_SUM_BIAS_CV_PV);
+
+    let fc_bias_sp_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("FC{}_Bias:SP", i)))
+        .collect();
+    let fc_bias_pv_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("FC{}_Bias:PV", i)))
+        .collect();
+    let fc_bias_op_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("FC{}_Bias:OP", i)))
+        .collect();
+    let fc_op_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("FC{}:OP", i)))
+        .collect();
+    let fc_pv_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("FC{}:PV", i)))
+        .collect();
+    let t_pv_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("T{}:PV", i)))
+        .collect();
+    let tdev_pv_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("T{}_Dev:PV", i)))
+        .collect();
+    let pass_flow_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("Pass{}:Flow", i)))
+        .collect();
+    let coke_offset_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("Pass{}:CokeOffset", i)))
+        .collect();
+    let coke_ramp_nodes: Vec<NodeId> = (1..=6)
+        .map(|i| NodeId::new(namespace, format!("Pass{}:CokeRampPerMin", i)))
+        .collect();
+
     // 5. Initialize Physics Engines
     let mut plant_deb = DebutanizerModel::new(ColumnConfig {
         num_stages: settings.debutanizer.num_stages,
@@ -128,6 +175,7 @@ async fn main() -> Result<()> {
     });
 
     let mut plant_cstr = CSTRModel::new();
+    let mut plant_pass = PassBalancingModel::new(1.0, PassBalancingConfig::default());
 
     println!("Physics Engines Loaded. Waiting for OPC UA...");
 
@@ -259,6 +307,20 @@ async fn main() -> Result<()> {
         if let Err(e) = opc_interface::write_single(&session, &NodeId::new(namespace, NODE_FEED_DV), init_feed).await {
             println!("  Warning: Failed to write Feed_Flow:PV - {}", e);
         }
+
+        let _ = opc_interface::write_single(&session, &node_flow_master_op, 50.0).await;
+        let _ = opc_interface::write_single(&session, &node_flow_master_sp, 300.0).await;
+        let _ = opc_interface::write_single(&session, &write_flow_master_pv, 300.0).await;
+        let _ = opc_interface::write_single(&session, &node_coke_enable, 0.0).await;
+        let _ = opc_interface::write_single(&session, &write_sum_bias, 0.0).await;
+        let _ = opc_interface::write_single(&session, &write_sum_bias_cv_pv, 0.0).await;
+        for i in 0..6 {
+            let _ = opc_interface::write_single(&session, &fc_bias_sp_nodes[i], 0.0).await;
+            let _ = opc_interface::write_single(&session, &fc_bias_pv_nodes[i], 0.0).await;
+            let _ = opc_interface::write_single(&session, &fc_bias_op_nodes[i], 0.0).await;
+            let _ = opc_interface::write_single(&session, &coke_offset_nodes[i], 0.0).await;
+            let _ = opc_interface::write_single(&session, &coke_ramp_nodes[i], 0.0).await;
+        }
         
         println!("Initial values set: Reflux={}m³/h, Steam={}m³/h, Feed={}m³/h, Mode={}", 
                  init_reflux, init_steam, init_feed, init_mode as i32);
@@ -292,13 +354,57 @@ async fn main() -> Result<()> {
                         t_feed: 300.0, 
                     };
 
+                    let flow_master_op = opc_interface::read_bulk(&session, &[node_flow_master_op.clone()])
+                        .await
+                        .ok()
+                        .and_then(|v| v.first().copied())
+                        .unwrap_or(50.0);
+
+                    let mut bias_sp = [0.0; 6];
+                    if let Ok(vals) = opc_interface::read_bulk(&session, &fc_bias_sp_nodes).await {
+                        for i in 0..6 {
+                            bias_sp[i] = *vals.get(i).unwrap_or(&0.0);
+                        }
+                    }
+
+                    let coke_enable = opc_interface::read_bulk(&session, &[node_coke_enable.clone()])
+                        .await
+                        .ok()
+                        .and_then(|v| v.first().copied())
+                        .unwrap_or(0.0)
+                        >= 0.5;
+
+                    let mut coke_offset = [0.0; 6];
+                    if let Ok(vals) = opc_interface::read_bulk(&session, &coke_offset_nodes).await {
+                        for i in 0..6 {
+                            coke_offset[i] = *vals.get(i).unwrap_or(&0.0);
+                        }
+                    }
+
+                    let mut coke_ramp_per_min = [0.0; 6];
+                    if let Ok(vals) = opc_interface::read_bulk(&session, &coke_ramp_nodes).await {
+                        for i in 0..6 {
+                            coke_ramp_per_min[i] = *vals.get(i).unwrap_or(&0.0);
+                        }
+                    }
+
+                    let pass_inputs = PassBalancingInputs {
+                        flow_master_op,
+                        bias_sp,
+                        coke_enable,
+                        coke_offset,
+                        coke_ramp_per_min,
+                    };
+
                     // Run simulation steps (speedup from config)
                     let mut deb_out = plant_deb.step(&deb_inputs);
                     let mut cstr_out = plant_cstr.step(&cstr_inputs);
+                    let mut pass_out = plant_pass.step(&pass_inputs);
 
                     for _ in 0..(settings.runtime.speed_multiplier - 1) {
                         deb_out = plant_deb.step(&deb_inputs);
                         cstr_out = plant_cstr.step(&cstr_inputs);
+                        pass_out = plant_pass.step(&pass_inputs);
                     }
 
                     // Write outputs
@@ -314,11 +420,30 @@ async fn main() -> Result<()> {
                     let _ = opc_interface::write_single(&session, &write_cstr_cool_pv, cool_temp).await;
                     let _ = opc_interface::write_single(&session, &write_cstr_cool_op, cool_temp).await;
 
+                    let _ = opc_interface::write_single(&session, &write_flow_master_pv, pass_out.total_flow).await;
+                    let _ = opc_interface::write_single(&session, &write_sum_bias, pass_out.sum_bias).await;
+                    let _ = opc_interface::write_single(&session, &write_sum_bias_cv_pv, pass_out.sum_bias).await;
+                    for i in 0..6 {
+                        let _ = opc_interface::write_single(&session, &t_pv_nodes[i], pass_out.temperatures[i]).await;
+                        let _ = opc_interface::write_single(&session, &tdev_pv_nodes[i], pass_out.temp_deviation[i]).await;
+                        let _ = opc_interface::write_single(&session, &fc_op_nodes[i], pass_out.valve_op[i]).await;
+                        let _ = opc_interface::write_single(&session, &fc_pv_nodes[i], pass_out.valve_op[i]).await;
+                        let _ = opc_interface::write_single(&session, &fc_bias_pv_nodes[i], bias_sp[i]).await;
+                        let _ = opc_interface::write_single(&session, &fc_bias_op_nodes[i], bias_sp[i]).await;
+                        let _ = opc_interface::write_single(&session, &pass_flow_nodes[i], pass_out.pass_flow[i]).await;
+                    }
+
                     // Log status
                     println!(
-                        "Tick (+{}s): [DEB] C4:{:.2}% BtmT:{:.1}C | [CSTR] T:{:.1}K Ca:{:.2}kmol/m3", 
+                        "Tick (+{}s): [DEB] C4:{:.2}% BtmT:{:.1}C | [CSTR] T:{:.1}K Ca:{:.2}kmol/m3 | [PASS] TDev1:{:+.2} TDev6:{:+.2} SumBias:{:+.2}", 
                         settings.runtime.speed_multiplier,
-                        deb_out.top_c4_frac * 100.0, deb_out.bottom_temp_deg_c, cstr_out.t, cstr_out.ca
+                        deb_out.top_c4_frac * 100.0,
+                        deb_out.bottom_temp_deg_c,
+                        cstr_out.t,
+                        cstr_out.ca,
+                        pass_out.temp_deviation[0],
+                        pass_out.temp_deviation[5],
+                        pass_out.sum_bias
                     );
                 }
                 Err(e) => {
