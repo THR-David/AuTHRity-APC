@@ -71,9 +71,6 @@ Live screenshots from local runs:
 ### Prediction & Control Horizon (Pass Balancing)
 ![Prediction and Control Horizon](assets/prediction_control.png)
 
-### Step Response Workflow
-![Model Step Response](assets/model%20step%20response.png)
-
 ### FOPDT Physics View
 ![FOPDT Physics](assets/fopdt%20physics.png)
 
