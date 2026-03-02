@@ -50,6 +50,12 @@ pub struct ControllerModelQuery {
     pub controller_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SaveControllerHostClientsRequest {
+    pub supervisors: Vec<crate::infrastructure::ServiceConfig>,
+    pub controller_host_clients: Vec<crate::infrastructure::ControllerHostClientSettings>,
+}
+
 pub async fn list_audit_admin(
     State(state): State<AppState>,
     user: CurrentUser,
@@ -197,16 +203,23 @@ pub async fn get_infrastructure(
         return e.into_response();
     }
 
-    match InfrastructureConfig::load("config/hosts.json").await {
-        Ok(config) => {
-            state
-                .auth
-                .audit(Some(&user), "infra.read", Some("config/hosts.json"), "success", None)
-                .await;
-            Json(config).into_response()
+    let config = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(config) => config,
+        Err(_) => {
+            let fallback = InfrastructureConfig::load("config/hosts.json").await.unwrap_or_default();
+            if let Err(e) = fallback.save_to_db(&state.settings.hmi_auth.database_url).await {
+                return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to initialize infrastructure settings: {}", e)).into_response();
+            }
+            fallback
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load config: {}", e)).into_response(),
-    }
+    };
+
+    state
+        .auth
+        .audit(Some(&user), "infra.read", Some("sqlite:infra_settings"), "success", None)
+        .await;
+
+    Json(config.redacted_for_api()).into_response()
 }
 
 pub async fn save_infrastructure(
@@ -219,15 +232,191 @@ pub async fn save_infrastructure(
         return e.into_response();
     }
 
-    match payload.save("config/hosts.json").await {
+    let existing = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url)
+        .await
+        .ok();
+    let merged_payload = payload.with_secret_refs(existing.as_ref());
+
+    match merged_payload.save_to_db(&state.settings.hmi_auth.database_url).await {
         Ok(_) => {
+            if let Err(sync_err) = sync_controller_host_opc_defaults(
+                &merged_payload,
+                &state.settings.services.supervisor_api_key,
+            )
+            .await
+            {
+                state
+                    .auth
+                    .audit(
+                        Some(&user),
+                        "infra.write",
+                        Some("sqlite:infra_settings"),
+                        "partial",
+                        Some(&format!("saved but sync failed: {}", sync_err)),
+                    )
+                    .await;
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Infrastructure saved, but Controller Host sync failed: {}", sync_err),
+                )
+                    .into_response();
+            }
+
             state
                 .auth
-                .audit(Some(&user), "infra.write", Some("config/hosts.json"), "success", None)
+                .audit(Some(&user), "infra.write", Some("sqlite:infra_settings"), "success", None)
                 .await;
             StatusCode::OK.into_response()
         }
-        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save config: {}", e)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to save infrastructure to DB: {}", e)).into_response(),
+    }
+}
+
+pub async fn save_controller_host_clients(
+    State(state): State<AppState>,
+    _: CsrfVerified,
+    user: CurrentUser,
+    Json(payload): Json<SaveControllerHostClientsRequest>,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let mut config = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(current) => current,
+        Err(_) => InfrastructureConfig::load("config/hosts.json").await.unwrap_or_default(),
+    };
+
+    config.supervisors = payload.supervisors;
+    config.controller_host_clients = payload.controller_host_clients;
+
+    let existing = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url)
+        .await
+        .ok();
+    let merged_payload = config.with_secret_refs(existing.as_ref());
+
+    match merged_payload.save_to_db(&state.settings.hmi_auth.database_url).await {
+        Ok(_) => {
+            if let Err(sync_err) = sync_controller_host_opc_defaults(
+                &merged_payload,
+                &state.settings.services.supervisor_api_key,
+            )
+            .await
+            {
+                state
+                    .auth
+                    .audit(
+                        Some(&user),
+                        "infra.controller_host_clients.write",
+                        Some("sqlite:infra_settings"),
+                        "partial",
+                        Some(&format!("saved but sync failed: {}", sync_err)),
+                    )
+                    .await;
+                return (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Controller Host clients saved, but sync failed: {}", sync_err),
+                )
+                    .into_response();
+            }
+
+            state
+                .auth
+                .audit(
+                    Some(&user),
+                    "infra.controller_host_clients.write",
+                    Some("sqlite:infra_settings"),
+                    "success",
+                    None,
+                )
+                .await;
+
+            StatusCode::OK.into_response()
+        }
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to save controller host clients to DB: {}", e),
+        )
+            .into_response(),
+    }
+}
+
+async fn sync_controller_host_opc_defaults(
+    infra: &InfrastructureConfig,
+    api_key: &str,
+) -> std::result::Result<(), String> {
+    let client = Client::new();
+    let mut failures: Vec<String> = Vec::new();
+
+    let opc_url = infra
+        .opc_servers
+        .first()
+        .and_then(|opc| opc.opc_endpoint.clone())
+        .filter(|value| !value.trim().is_empty());
+
+    for supervisor in &infra.supervisors {
+        let Some(host_client) = infra
+            .controller_host_clients
+            .iter()
+            .find(|candidate| candidate.supervisor_id == supervisor.id)
+        else {
+            continue;
+        };
+
+        let (username, password) = infra.resolve_controller_host_username_password(&supervisor.id);
+        let url = format!("{}/api/opc-client/defaults", supervisor.url.trim_end_matches('/'));
+
+        let body = serde_json::json!({
+            "opc_url": opc_url.clone(),
+            "security_policy": host_client.security_policy,
+            "message_mode": host_client.security_mode,
+            "auth_mode": normalize_auth_mode_payload(&host_client.auth_mode),
+            "username": username,
+            "password": password,
+        });
+
+        match client
+            .post(&url)
+            .header("x-api-key", api_key)
+            .json(&body)
+            .send()
+            .await
+        {
+            Ok(response) if response.status().is_success() => {}
+            Ok(response) => {
+                let status = response.status();
+                let detail = response.text().await.unwrap_or_else(|_| "no response body".to_string());
+                failures.push(format!("{} -> {}: {}", supervisor.name, status, detail));
+            }
+            Err(err) => failures.push(format!("{} -> request error: {}", supervisor.name, err)),
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(())
+    } else {
+        Err(failures.join("; "))
+    }
+}
+
+pub async fn reconnect_opc_worker(
+    State(state): State<AppState>,
+    _: CsrfVerified,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    match state.cmd_tx.send(OpcCommand::Reconnect).await {
+        Ok(_) => {
+            state
+                .auth
+                .audit(Some(&user), "infra.opc_reconnect", Some("opc_worker"), "success", None)
+                .await;
+            StatusCode::OK.into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to request OPC reconnect: {}", e)).into_response(),
     }
 }
 
@@ -422,6 +611,7 @@ async fn handle_socket(socket: WebSocket, state: AppState, user: CurrentUser) {
 
 // --- LIST ALL YAML MODELS ---
 pub async fn list_models(
+    State(state): State<AppState>,
     user: CurrentUser,
 ) -> impl IntoResponse {
     if let Err(e) = user.require(Permission::ReadView) {
@@ -429,7 +619,7 @@ pub async fn list_models(
     }
 
     // Load registry to find primary OPC server and list models from remote source only.
-    if let Ok(infra) = InfrastructureConfig::load("config/hosts.json").await {
+    if let Ok(infra) = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
         if let Some(opc) = infra.opc_servers.first() {
             let client = Client::builder()
                 .timeout(std::time::Duration::from_millis(500))
@@ -449,7 +639,7 @@ pub async fn list_models(
         }
     }
 
-    (StatusCode::NOT_FOUND, "No OPC server configured in config/hosts.json").into_response()
+    (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response()
 }
 
 // --- DYNAMIC CONFIG LOADER ---
@@ -459,6 +649,7 @@ pub struct ModelParams {
 }
 
 pub async fn get_model_config(
+    State(state): State<AppState>,
     user: CurrentUser,
     Query(params): Query<ModelParams>,
 ) -> impl IntoResponse {
@@ -472,7 +663,7 @@ pub async fn get_model_config(
     };
     
     // 1. Try fetching from Remote OPC Server
-    if let Ok(infra) = InfrastructureConfig::load("config/hosts.json").await {
+    if let Ok(infra) = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
         if let Some(opc) = infra.opc_servers.first() {
             let client = Client::builder()
                 .timeout(std::time::Duration::from_millis(500))
@@ -495,11 +686,12 @@ pub async fn get_model_config(
         }
     }
 
-    (StatusCode::NOT_FOUND, "No OPC server configured in config/hosts.json").into_response()
+    (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response()
 }
 
 // --- FETCH PHYSICS FROM SUPERVISOR ---
 pub async fn get_remote_physics(
+    State(state): State<AppState>,
     user: CurrentUser,
     AxumPath(id): AxumPath<String>,
 ) -> impl IntoResponse {
@@ -508,7 +700,7 @@ pub async fn get_remote_physics(
     }
 
     // 1. Get primary supervisor from registry
-    if let Ok(infra) = InfrastructureConfig::load("config/hosts.json").await {
+    if let Ok(infra) = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
         if let Some(sup) = infra.supervisors.first() {
             let client = Client::new();
             let url = format!("{}/api/controllers/{}/config", sup.url, id);
@@ -707,22 +899,68 @@ pub async fn start_controller_proxy(
         return e.into_response();
     }
 
-    let target_sup = state.settings.services.supervisor_url.clone();
+    let mut target_sup = state.settings.services.supervisor_url.clone();
     let api_key = state.settings.services.supervisor_api_key.clone();
-    let target_opc_tcp = state.settings.opcua.endpoint_url.clone(); 
-    let auth_mode = state.settings.auth.mode.as_str();
-    let auth_username = state.settings.auth.username.clone();
-    let auth_password = state.settings.auth.password.clone();
+    let mut target_opc_tcp = state.settings.opcua.endpoint_url.clone();
+    let mut auth_mode = state.settings.auth.mode.as_str().to_string();
+    let mut auth_username = state.settings.auth.username.clone();
+    let mut auth_password = state.settings.auth.password.clone();
+    let mut security_policy = state.settings.opcua.security_policy.clone();
+    let mut message_mode = state.settings.opcua.message_mode.clone();
+
+    let target_sup_from_payload = payload
+        .get("target_supervisor")
+        .and_then(|v| v.as_str())
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+
+    if let Ok(infra) = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        if let Some(from_payload) = target_sup_from_payload {
+            target_sup = from_payload;
+        } else if let Some(supervisor) = infra.supervisors.first() {
+            target_sup = supervisor.url.clone();
+        }
+
+        if let Some(opc) = infra.opc_servers.first() {
+            if let Some(endpoint) = &opc.opc_endpoint {
+                if !endpoint.trim().is_empty() {
+                    target_opc_tcp = endpoint.clone();
+                }
+            }
+        }
+
+        if let Some(selected_supervisor) = infra.supervisors.iter().find(|sup| sup.url == target_sup) {
+            if let Some(host_client) = infra
+                .controller_host_clients
+                .iter()
+                .find(|client| client.supervisor_id == selected_supervisor.id)
+            {
+                auth_mode = host_client.auth_mode.clone();
+                let (resolved_username, resolved_password) =
+                    infra.resolve_controller_host_username_password(&selected_supervisor.id);
+                auth_username = resolved_username;
+                auth_password = resolved_password;
+                security_policy = host_client.security_policy.clone();
+                message_mode = host_client.security_mode.clone();
+            }
+        }
+    }
 
     // Inject OPC URL into the payload if not present
     if let Some(obj) = payload.as_object_mut() {
         if !obj.contains_key("opc_url") {
             obj.insert("opc_url".to_string(), serde_json::json!(target_opc_tcp));
         }
-        if !obj.contains_key("auth_mode") {
-            obj.insert("auth_mode".to_string(), serde_json::json!(auth_mode));
+        if !obj.contains_key("security_policy") {
+            obj.insert("security_policy".to_string(), serde_json::json!(security_policy));
         }
-        if auth_mode == "username" {
+        if !obj.contains_key("message_mode") {
+            obj.insert("message_mode".to_string(), serde_json::json!(message_mode));
+        }
+        if !obj.contains_key("auth_mode") {
+            obj.insert("auth_mode".to_string(), serde_json::json!(normalize_auth_mode_payload(&auth_mode)));
+        }
+        if normalize_auth_mode_payload(&auth_mode) == "username" {
             if !obj.contains_key("username") {
                 if let Some(username) = auth_username {
                     if !username.trim().is_empty() {
@@ -758,6 +996,14 @@ pub async fn start_controller_proxy(
             }
         }
         Err(e) => (StatusCode::BAD_GATEWAY, format!("Supervisor unreachable: {}", e)).into_response(),
+    }
+}
+
+fn normalize_auth_mode_payload(mode: &str) -> &'static str {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "anonymous" | "anon" => "anonymous",
+        "x509" | "cert" | "certificate" => "x509",
+        _ => "username",
     }
 }
 

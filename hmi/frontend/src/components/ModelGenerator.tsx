@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_MODEL, type CvOptimizationMode, type FullModel, type MvOptimizationMode, type VarConfig } from '../types/ModelConfig';
-import { Save, Upload, Download, Plus, Trash2, Activity, FileText, CheckCircle, ArrowDown, ArrowUp, Server, Network, Rocket, RefreshCw } from 'lucide-react';
+import { Save, Upload, Download, Plus, Trash2, Activity, FileText, CheckCircle, ArrowDown, ArrowUp, Server, Network, Rocket, RefreshCw, AlertCircle } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { MatrixEditor } from './MatrixEditor';
 import StepResponseTool from './StepResponseTool';

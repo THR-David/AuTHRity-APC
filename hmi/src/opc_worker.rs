@@ -1,22 +1,20 @@
-use anyhow::{Result, anyhow};
-use std::time::Duration;
+use anyhow::{anyhow, Result};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use reqwest::Client; // Added
-use crate::infrastructure::InfrastructureConfig; // Added
-use crate::config::AuthMode;
+use std::time::Duration;
+use tokio::sync::broadcast;
+use tokio::sync::mpsc::Receiver;
 
+use crate::infrastructure::InfrastructureConfig;
 use opcua::{
-    client::{ClientBuilder, IdentityToken, Session, DataChangeCallback},
-    crypto::{SecurityPolicy, X509, PrivateKey},
+    client::{ClientBuilder, DataChangeCallback, IdentityToken, Session},
+    crypto::{PrivateKey, X509},
     types::{
-        MessageSecurityMode, NodeId, UserTokenPolicy, 
-        MonitoredItemCreateRequest, MonitoringParameters, 
-        MonitoringMode, ReadValueId, AttributeId, 
-        TimestampsToReturn, Variant, NumericRange,
+        AttributeId, MessageSecurityMode, MonitoredItemCreateRequest, MonitoringMode, MonitoringParameters,
+        NodeId, NumericRange, ReadValueId, TimestampsToReturn, UserTokenPolicy, Variant,
     },
 };
-use tokio::sync::broadcast;
-use serde::{Deserialize, Serialize};
 
 // --- DATA STRUCTURES ---
 
@@ -26,6 +24,7 @@ pub enum OpcCommand {
     WriteString(String, String),
     WriteBool(String, bool),
     ReadAll,
+    Reconnect,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -61,6 +60,15 @@ fn broadcast_sys(tx: &broadcast::Sender<OpcUpdate>, tag: &str, val: i32) {
     });
 }
 
+fn broadcast_sys_text(tx: &broadcast::Sender<OpcUpdate>, tag: &str, val: &str) {
+    let _ = tx.send(OpcUpdate {
+        node_id: format!("System:{}", tag),
+        value: serde_json::json!(val),
+        timestamp: chrono::Local::now().to_rfc3339(),
+        status: 1,
+    });
+}
+
 // --- MAIN WORKER ---
 
 pub async fn run_opc_worker(
@@ -75,7 +83,7 @@ pub async fn run_opc_worker(
         .trust_server_certs(settings.identity.trust_server_certs)
         .create_sample_keypair(settings.identity.auto_create_keys) 
         .session_retry_limit(3)
-        .pki_dir(std::path::PathBuf::from("."))
+        .pki_dir(std::path::PathBuf::from(&settings.paths.pki_dir))
         .certificate_path(&settings.paths.cert_path)
         .private_key_path(&settings.paths.key_path)
         .client()
@@ -86,21 +94,20 @@ pub async fn run_opc_worker(
     let key_bytes = std::fs::read(&settings.paths.key_path)?;
     let private_key = PrivateKey::from_pem(&key_bytes)?;
 
-    if settings.auth.mode == AuthMode::Username {
-        let user = settings.auth.username.as_deref().unwrap_or("").trim();
-        let pass = settings.auth.password.as_deref().unwrap_or("").trim();
-        if user.is_empty() || pass.is_empty() {
-            return Err(anyhow!("Invalid OPC auth config: username mode requires non-empty auth.username and auth.password"));
-        }
-    }
-
     let mut heartbeat_counter = 0;
+    let mut connect_failures: u32 = 0;
+    let base_retry = settings.runtime.reconnect_delay_sec.max(2);
 
     loop {
-        // Dynamic Config Lookup: Prioritize hosts.json (Infrastructure) over settings.toml
+        // Dynamic Config Lookup: Prioritize SQLite infrastructure settings over settings.toml
         let mut target_endpoint = settings.opcua.endpoint_url.clone();
+        let mut target_security_policy = settings.opcua.security_policy.clone();
+        let mut target_security_mode = parse_message_mode(&settings.opcua.message_mode);
+        let mut target_auth_mode = settings.auth.mode.as_str().to_string();
+        let mut target_username = settings.auth.username.clone().unwrap_or_default();
+        let mut target_password = settings.auth.password.clone().unwrap_or_default();
         
-        if let Ok(infra) = crate::infrastructure::InfrastructureConfig::load("config/hosts.json").await {
+        if let Ok(infra) = crate::infrastructure::InfrastructureConfig::load_from_db(&settings.hmi_auth.database_url).await {
              if let Some(opc_srv) = infra.opc_servers.first() {
                  if let Some(ep) = &opc_srv.opc_endpoint {
                      if !ep.is_empty() {
@@ -108,37 +115,61 @@ pub async fn run_opc_worker(
                      }
                  }
              }
+
+             target_security_policy = infra.hmi_client.security_policy.clone();
+             target_security_mode = parse_message_mode(&infra.hmi_client.security_mode);
+             target_auth_mode = infra.hmi_client.auth_mode.clone();
+               let (resolved_username, resolved_password) = infra.resolve_hmi_username_password();
+               target_username = resolved_username.unwrap_or_default();
+               target_password = resolved_password.unwrap_or_default();
         }
 
         println!("🔄 HMI Worker: Connecting to {}...", target_endpoint);
         broadcast_sys(&tx, "PlcConnection", 0);
 
-        let (user_token_policy, identity_token) = match settings.auth.mode {
-            AuthMode::Username => {
-                let username = settings.auth.username.clone().unwrap_or_default();
-                let password = settings.auth.password.clone().unwrap_or_default();
+        let (user_token_policy, identity_token) = match normalize_auth_mode(&target_auth_mode).as_str() {
+            "anonymous" => (
+                UserTokenPolicy {
+                    token_type: opcua::types::UserTokenType::Anonymous,
+                    ..Default::default()
+                },
+                IdentityToken::Anonymous,
+            ),
+            "username" => {
+                if target_username.trim().is_empty() || target_password.trim().is_empty() {
+                    connect_failures = connect_failures.saturating_add(1);
+                    let delay = compute_retry_delay(base_retry, connect_failures, true);
+                    broadcast_sys(&tx, "PlcAuthError", 1);
+                    broadcast_sys_text(&tx, "PlcLastError", "Username auth selected but username/password is empty");
+                    println!(
+                        "❌ Username auth selected but credentials are empty. Retrying in {}s...",
+                        delay
+                    );
+                    let _ = wait_retry_or_reconnect(&mut cmd_rx, delay).await;
+                    continue;
+                }
                 (
                     UserTokenPolicy {
                         token_type: opcua::types::UserTokenType::UserName,
                         ..Default::default()
                     },
-                    IdentityToken::UserName(username, password.into()),
+                    IdentityToken::UserName(target_username.clone(), target_password.clone().into()),
                 )
             }
-            AuthMode::X509 => (
-                UserTokenPolicy {
-                    token_type: opcua::types::UserTokenType::Certificate,
-                    ..Default::default()
-                },
-                IdentityToken::X509(Box::new(x509.clone()), Box::new(private_key.clone())),
-            ),
+            _ => (
+                    UserTokenPolicy {
+                        token_type: opcua::types::UserTokenType::Certificate,
+                        ..Default::default()
+                    },
+                    IdentityToken::X509(Box::new(x509.clone()), Box::new(private_key.clone())),
+                ),
         };
 
         let session = match client_builder.connect_to_matching_endpoint(
             (
                 target_endpoint.as_str(),
-                SecurityPolicy::Basic256Sha256.to_str(),
-                MessageSecurityMode::SignAndEncrypt,
+                target_security_policy.as_str(),
+                target_security_mode,
                 user_token_policy,
             ),
             identity_token,
@@ -148,12 +179,48 @@ pub async fn run_opc_worker(
                 s
             },
             Err(e) => {
-                println!("❌ Connection Error: {}. Retrying in 5s...", e);
+                connect_failures = connect_failures.saturating_add(1);
+                let error_text = e.to_string();
+                let lowered = error_text.to_ascii_lowercase();
+                let is_auth_error = lowered.contains("baduseraccessdenied")
+                    || lowered.contains("identity")
+                    || lowered.contains("user access denied")
+                    || lowered.contains("badidentitytoken");
+                let delay = compute_retry_delay(base_retry, connect_failures, is_auth_error);
+                if is_auth_error {
+                    broadcast_sys(&tx, "PlcAuthError", 1);
+                }
+                broadcast_sys_text(&tx, "PlcLastError", &error_text);
+                println!("❌ Connection Error: {}. Retrying in {}s...", e, delay);
                 broadcast_sys(&tx, "PlcConnection", 0);
-                tokio::time::sleep(Duration::from_secs(5)).await;
+                let _ = wait_retry_or_reconnect(&mut cmd_rx, delay).await;
                 continue;
             }
         };
+
+        if let Err(err_text) = validate_session_connection(&session).await {
+            connect_failures = connect_failures.saturating_add(1);
+            let lowered = err_text.to_ascii_lowercase();
+            let is_auth_error = lowered.contains("badidentitytokenrejected")
+                || lowered.contains("badidentitytoken")
+                || lowered.contains("baduseraccessdenied")
+                || lowered.contains("identity")
+                || lowered.contains("user access denied")
+                || lowered.contains("authenticate");
+            let delay = compute_retry_delay(base_retry, connect_failures, is_auth_error);
+            if is_auth_error {
+                broadcast_sys(&tx, "PlcAuthError", 1);
+            }
+            broadcast_sys_text(&tx, "PlcLastError", &err_text);
+            broadcast_sys(&tx, "PlcConnection", 0);
+            println!("❌ Session validation failed: {}. Retrying in {}s...", err_text, delay);
+            let _ = wait_retry_or_reconnect(&mut cmd_rx, delay).await;
+            continue;
+        }
+
+        connect_failures = 0;
+        broadcast_sys(&tx, "PlcAuthError", 0);
+        broadcast_sys_text(&tx, "PlcLastError", "");
 
         println!("✅ Connected via OPC UA!");
         broadcast_sys(&tx, "PlcConnection", 1);
@@ -164,7 +231,7 @@ pub async fn run_opc_worker(
         let ns = settings.opcua.namespace_index;
         let mut all_monitored_nodes: Vec<NodeId> = Vec::new(); 
         // Discover nodes from remote OPC management API only.
-        if let Ok(infra) = InfrastructureConfig::load("config/hosts.json").await {
+        if let Ok(infra) = InfrastructureConfig::load_from_db(&settings.hmi_auth.database_url).await {
             if let Some(opc_srv) = infra.opc_servers.first() {
                 let mgmt_url = &opc_srv.url;
                 println!("🔍 Discovering nodes from: {}", mgmt_url);
@@ -264,6 +331,10 @@ pub async fn run_opc_worker(
                                 let _ = read_and_broadcast(&session, &all_monitored_nodes, &tx).await;
                                 broadcast_sys(&tx, "PlcConnection", 1);
                             }
+                        },
+                        OpcCommand::Reconnect => {
+                            println!("🔁 Reconnect requested by settings change.");
+                            break;
                         }
                     }
                 }
@@ -425,4 +496,100 @@ fn variant_to_json(var: &Variant) -> serde_json::Value {
         },
         _ => serde_json::json!("Unsupported"),
     }
+}
+
+fn parse_message_mode(mode: &str) -> MessageSecurityMode {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "none" => MessageSecurityMode::None,
+        "sign" => MessageSecurityMode::Sign,
+        "signandencrypt" | "sign_and_encrypt" | "sign&encrypt" => MessageSecurityMode::SignAndEncrypt,
+        _ => MessageSecurityMode::SignAndEncrypt,
+    }
+}
+
+fn normalize_auth_mode(mode: &str) -> String {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "anonymous" | "anon" => "anonymous".to_string(),
+        "credentials" | "credential" | "username/password" | "username" => "username".to_string(),
+        "certificate" | "cert" | "x509" => "x509".to_string(),
+        _ => "username".to_string(),
+    }
+}
+
+fn compute_retry_delay(base_retry: u64, failures: u32, auth_related: bool) -> u64 {
+    let multiplier = if auth_related { 3 } else { 1 };
+    let power = failures.saturating_sub(1).min(3);
+    let exponential = 1u64 << power;
+    (base_retry * multiplier * exponential).min(60)
+}
+
+async fn wait_retry_or_reconnect(cmd_rx: &mut Receiver<OpcCommand>, delay_secs: u64) -> bool {
+    let sleeper = tokio::time::sleep(Duration::from_secs(delay_secs));
+    tokio::pin!(sleeper);
+
+    loop {
+        tokio::select! {
+            _ = &mut sleeper => return false,
+            cmd = cmd_rx.recv() => {
+                match cmd {
+                    Some(OpcCommand::Reconnect) => return true,
+                    Some(_) => continue,
+                    None => return false,
+                }
+            }
+        }
+    }
+}
+
+async fn validate_session_connection(session: &Arc<Session>) -> std::result::Result<(), String> {
+    let ping_node = ReadValueId {
+        node_id: NodeId::new(0, 2259),
+        attribute_id: AttributeId::Value as u32,
+        index_range: NumericRange::None,
+        data_encoding: opcua::types::QualifiedName::null(),
+    };
+
+    let mut last_error = String::new();
+    for _ in 0..6 {
+        match session.read(&[ping_node.clone()], TimestampsToReturn::Neither, 0.0).await {
+            Ok(values) => {
+                if let Some(value) = values.first() {
+                    if let Some(status) = value.status {
+                        if status.is_bad() {
+                            let status_text = format!("{:?}", status).to_ascii_lowercase();
+                            let is_auth_or_session = status_text.contains("identity")
+                                || status_text.contains("access")
+                                || status_text.contains("session")
+                                || status_text.contains("user");
+                            if is_auth_or_session {
+                                return Err(format!("OPC read status: {:?}", status));
+                            }
+
+                            if status_text.contains("notconnected") {
+                                last_error = format!("OPC read status: {:?}", status);
+                                tokio::time::sleep(Duration::from_millis(300)).await;
+                                continue;
+                            }
+                        }
+                    }
+                }
+                return Ok(());
+            }
+            Err(e) => {
+                let err_text = e.to_string();
+                if err_text.to_ascii_lowercase().contains("badnotconnected") {
+                    last_error = err_text;
+                    tokio::time::sleep(Duration::from_millis(300)).await;
+                    continue;
+                }
+                return Err(err_text);
+            }
+        }
+    }
+
+    Err(if last_error.is_empty() {
+        "OPC session validation failed".to_string()
+    } else {
+        last_error
+    })
 }

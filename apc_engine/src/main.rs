@@ -41,6 +41,14 @@ struct Args {
     /// OPC UA auth mode: username or x509
     #[arg(long, default_value = "username")]
     auth_mode: String,
+    
+    /// OPC UA security policy (None or Basic256Sha256)
+    #[arg(long, default_value = "Basic256Sha256")]
+    security_policy: String,
+    
+    /// OPC UA message security mode (None, Sign, SignAndEncrypt)
+    #[arg(long, default_value = "SignAndEncrypt")]
+    message_mode: String,
 
     /// Username for OPC UA username/password auth
     #[arg(long)]
@@ -56,6 +64,31 @@ fn parse_auth_mode(mode: &str) -> Result<AuthMode> {
         "username" => Ok(AuthMode::Username),
         "x509" => Ok(AuthMode::X509),
         _ => Err(anyhow!("Invalid --auth-mode '{}'. Use 'username' or 'x509'", mode)),
+    }
+}
+
+fn parse_security_policy(policy: &str) -> Result<&'static str> {
+    match policy.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(SecurityPolicy::None.to_str()),
+        "basic256sha256" => Ok(SecurityPolicy::Basic256Sha256.to_str()),
+        other => Err(anyhow!(
+            "Invalid --security-policy '{}'. Use 'None' or 'Basic256Sha256'",
+            other
+        )),
+    }
+}
+
+fn parse_message_mode(mode: &str) -> Result<MessageSecurityMode> {
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "none" => Ok(MessageSecurityMode::None),
+        "sign" => Ok(MessageSecurityMode::Sign),
+        "signandencrypt" | "sign_and_encrypt" | "sign-and-encrypt" => {
+            Ok(MessageSecurityMode::SignAndEncrypt)
+        }
+        other => Err(anyhow!(
+            "Invalid --message-mode '{}'. Use 'None', 'Sign', or 'SignAndEncrypt'",
+            other
+        )),
     }
 }
 
@@ -286,12 +319,16 @@ async fn main() -> Result<()> {
     let args = Args::parse();
     println!("🔐 Starting Industrial DMC (Worker Mode)...");
     let auth_mode = parse_auth_mode(&args.auth_mode)?;
+    let security_policy = parse_security_policy(&args.security_policy)?;
+    let message_mode = parse_message_mode(&args.message_mode)?;
     
     // Construct AppSettings from Args (Migration from settings.toml)
     let pki_path = PathBuf::from(&args.pki);
     let mut settings = AppSettings {
         opcua: config::OpcuaConfig {
             endpoint_url: args.opc.clone(),
+            security_policy: args.security_policy.clone(),
+            message_mode: args.message_mode.clone(),
             namespace_index: 2,
         },
         identity: config::IdentityConfig {
@@ -336,6 +373,8 @@ async fn main() -> Result<()> {
     println!("⚙️ Engine ID: {}", engine_id);
     println!("⚙️ Model Path: {}", settings.runtime.model_path);
     println!("⚙️ Target OPC: {}", settings.opcua.endpoint_url);
+    println!("⚙️ Security Policy: {}", settings.opcua.security_policy);
+    println!("⚙️ Message Mode: {}", settings.opcua.message_mode);
 
     // 3. Security Config
     let _project_root = PathBuf::from("."); // We use "." because the Arg overrides the path, but the PKI lib takes a base dir
@@ -406,8 +445,8 @@ async fn main() -> Result<()> {
         let session = match client.connect_to_matching_endpoint(
             (
                 settings.opcua.endpoint_url.as_str(),
-                SecurityPolicy::Basic256Sha256.to_str(),
-                MessageSecurityMode::SignAndEncrypt,
+                security_policy,
+                message_mode,
                 UserTokenPolicy {
                     token_type,
                     ..Default::default()

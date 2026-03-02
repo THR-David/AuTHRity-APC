@@ -70,6 +70,7 @@ impl Role {
                     | Permission::RuntimeWriteLimitsSafety
                     | Permission::ModelDeploy
                     | Permission::ControllerLifecycle
+                    | Permission::InfraWrite
             ),
             Self::Admin => true,
         }
@@ -891,6 +892,7 @@ pub async fn me(
 pub async fn change_password(
     State(state): State<AppState>,
     _: CsrfVerified,
+    session: Session,
     user: CurrentUser,
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<impl IntoResponse, AuthError> {
@@ -918,6 +920,14 @@ pub async fn change_password(
     }
 
     state.auth.change_password(user.id, payload.new_password.trim()).await?;
+
+    if let Some(updated) = state.auth.get_user_auth_state(user.id).await? {
+        session
+            .insert("auth_version", updated.auth_version)
+            .await
+            .map_err(|_| AuthError::Internal)?;
+    }
+
     state
         .auth
         .audit(Some(&user), "auth.change_password", None, "success", None)

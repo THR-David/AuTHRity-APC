@@ -43,6 +43,10 @@ struct Args {
     /// PKI Directory (Authentication)
     #[arg(long, default_value = "./pki")]
     pki_dir: String,
+
+    /// Path to persisted OPC client defaults env file
+    #[arg(long, default_value = "./config/opc_client.env")]
+    opc_defaults_path: String,
 }
 
 #[derive(Clone)]
@@ -50,9 +54,21 @@ struct AppState {
     model_dir: PathBuf,
     engine_bin: PathBuf,
     pki_dir: PathBuf,
+    opc_defaults_path: PathBuf,
     api_key: String,
+    opc_client_defaults: Arc<Mutex<OpcClientDefaults>>,
     // Map of ModelID -> ProcessHandle (Simulator for now, in real life need Child handle management)
     processes: Arc<Mutex<HashMap<String, ProcessStatus>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct OpcClientDefaults {
+    opc_url: String,
+    auth_mode: String,
+    username: Option<String>,
+    password: Option<String>,
+    security_policy: String,
+    message_mode: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -127,17 +143,29 @@ async fn main() {
     
     // Canonicalize to absolute path to ensure child process finds it regardless of CWD
     let abs_pki = std::fs::canonicalize(&final_pki_dir).unwrap_or(final_pki_dir);
+    let opc_defaults_path = PathBuf::from(&args.opc_defaults_path);
+    let initial_defaults = load_opc_client_defaults(&opc_defaults_path).unwrap_or_else(|| OpcClientDefaults {
+        opc_url: "opc.tcp://127.0.0.1:4855".to_string(),
+        auth_mode: "username".to_string(),
+        username: None,
+        password: None,
+        security_policy: "Basic256Sha256".to_string(),
+        message_mode: "SignAndEncrypt".to_string(),
+    });
 
     let shared_state = AppState {
         model_dir,
         engine_bin,
         pki_dir: abs_pki,
+        opc_defaults_path,
         api_key: args.api_key.clone(),
+        opc_client_defaults: Arc::new(Mutex::new(initial_defaults)),
         processes: Arc::new(Mutex::new(HashMap::new())),
     };
 
     let app = Router::new()
         .route("/api/controllers", get(list_controllers))
+        .route("/api/opc-client/defaults", get(get_opc_client_defaults).post(set_opc_client_defaults))
         .route("/api/controllers/:id/start", post(start_controller))
         .route("/api/controllers/:id/stop", post(stop_controller))
         .route("/api/controllers/:id/config", get(get_model_config)) // <--- Added: Access to Single Source of Truth for Physics
@@ -235,11 +263,113 @@ async fn list_controllers(State(state): State<AppState>) -> Json<Vec<ControllerS
 
 #[derive(Deserialize)]
 struct StartRequest {
-    opc_url: Option<String>,
     model_filename: String, // REQUIRED now
+    opc_url: Option<String>,
+    security_policy: Option<String>,
+    message_mode: Option<String>,
     auth_mode: Option<String>,
     username: Option<String>,
     password: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct SetOpcClientDefaultsRequest {
+    opc_url: Option<String>,
+    security_policy: Option<String>,
+    message_mode: Option<String>,
+    auth_mode: Option<String>,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Serialize)]
+struct OpcClientDefaultsResponse {
+    opc_url: String,
+    security_policy: String,
+    message_mode: String,
+    auth_mode: String,
+    username: Option<String>,
+}
+
+fn validate_auth_payload(auth_mode: &str, username: &Option<String>, password: &Option<String>) -> Result<(), String> {
+    let auth_mode_normalized = auth_mode.to_ascii_lowercase();
+    if auth_mode_normalized != "username" && auth_mode_normalized != "x509" && auth_mode_normalized != "anonymous" {
+        return Err("auth_mode must be 'username', 'x509', or 'anonymous'".to_string());
+    }
+
+    if auth_mode_normalized == "username" {
+        let user_ok = username.as_deref().map(str::trim).is_some_and(|u| !u.is_empty());
+        let pass_ok = password.as_deref().map(str::trim).is_some_and(|p| !p.is_empty());
+        if !user_ok || !pass_ok {
+            return Err("username auth_mode requires non-empty username and password".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+async fn get_opc_client_defaults(State(state): State<AppState>) -> impl IntoResponse {
+    let defaults = state.opc_client_defaults.lock().unwrap().clone();
+    Json(OpcClientDefaultsResponse {
+        opc_url: defaults.opc_url,
+        security_policy: defaults.security_policy,
+        message_mode: defaults.message_mode,
+        auth_mode: defaults.auth_mode,
+        username: defaults.username,
+    })
+}
+
+async fn set_opc_client_defaults(
+    State(state): State<AppState>,
+    Json(payload): Json<SetOpcClientDefaultsRequest>,
+) -> impl IntoResponse {
+    let mut defaults = state.opc_client_defaults.lock().unwrap();
+
+    let next_auth_mode = payload
+        .auth_mode
+        .clone()
+        .unwrap_or_else(|| defaults.auth_mode.clone());
+    let next_username = payload.username.clone().or_else(|| defaults.username.clone());
+    let next_password = payload.password.clone().or_else(|| defaults.password.clone());
+
+    if let Err(msg) = validate_auth_payload(&next_auth_mode, &next_username, &next_password) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
+
+    if let Some(opc_url) = payload.opc_url {
+        if !opc_url.trim().is_empty() {
+            defaults.opc_url = opc_url;
+        }
+    }
+    if let Some(policy) = payload.security_policy {
+        if !policy.trim().is_empty() {
+            defaults.security_policy = policy;
+        }
+    }
+    if let Some(mode) = payload.message_mode {
+        if !mode.trim().is_empty() {
+            defaults.message_mode = mode;
+        }
+    }
+
+    defaults.auth_mode = next_auth_mode;
+    defaults.username = next_username;
+    defaults.password = next_password;
+
+    let snapshot = defaults.clone();
+    drop(defaults);
+
+    if let Err(err) = persist_opc_client_defaults(&state.opc_defaults_path, &snapshot) {
+        error!("Failed to persist controller_host OPC defaults: {}", err);
+        return (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to persist OPC defaults: {}", err),
+        )
+            .into_response();
+    }
+
+    info!("Updated controller_host OPC client defaults");
+    StatusCode::OK.into_response()
 }
 
 async fn start_controller(
@@ -266,28 +396,58 @@ async fn start_controller(
 
     info!("Starting controller {} with model {}...", id, payload.model_filename);
     
-    // Determine OPC URL (Payload > default)
-    let opc_url = payload.opc_url.clone().unwrap_or_else(|| "opc.tcp://127.0.0.1:4855".to_string());
-    let auth_mode = payload.auth_mode.clone().unwrap_or_else(|| "username".to_string());
-
-    let auth_mode_normalized = auth_mode.to_ascii_lowercase();
-    if auth_mode_normalized != "username" && auth_mode_normalized != "x509" {
-        return (StatusCode::BAD_REQUEST, "auth_mode must be 'username' or 'x509'").into_response();
+    // Determine OPC client settings (payload overrides controller_host defaults)
+    let mut defaults = state.opc_client_defaults.lock().unwrap().clone();
+    if let Some(opc_url) = payload.opc_url.clone() {
+        if !opc_url.trim().is_empty() {
+            defaults.opc_url = opc_url;
+        }
+    }
+    if let Some(policy) = payload.security_policy.clone() {
+        if !policy.trim().is_empty() {
+            defaults.security_policy = policy;
+        }
+    }
+    if let Some(mode) = payload.message_mode.clone() {
+        if !mode.trim().is_empty() {
+            defaults.message_mode = mode;
+        }
+    }
+    if let Some(auth_mode) = payload.auth_mode.clone() {
+        defaults.auth_mode = auth_mode;
+    }
+    if payload.username.is_some() {
+        defaults.username = payload.username.clone();
+    }
+    if payload.password.is_some() {
+        defaults.password = payload.password.clone();
     }
 
-    let username = payload.username.clone();
-    let password = payload.password.clone();
+    if let Err(msg) = validate_auth_payload(&defaults.auth_mode, &defaults.username, &defaults.password) {
+        return (StatusCode::BAD_REQUEST, msg).into_response();
+    }
 
-    if auth_mode_normalized == "username" {
-        let user_ok = username.as_deref().map(str::trim).is_some_and(|u| !u.is_empty());
-        let pass_ok = password.as_deref().map(str::trim).is_some_and(|p| !p.is_empty());
-        if !user_ok || !pass_ok {
-            return (StatusCode::BAD_REQUEST, "username auth_mode requires non-empty username and password").into_response();
+    let opc_url = defaults.opc_url.clone();
+    let auth_mode = defaults.auth_mode.clone();
+    let security_policy = defaults.security_policy.clone();
+    let message_mode = defaults.message_mode.clone();
+    let username = defaults.username.clone();
+    let password = defaults.password.clone();
+    let auth_mode_normalized = auth_mode.to_ascii_lowercase();
+
+    // Persist resolved settings as the new default for subsequent starts
+    {
+        let mut default_guard = state.opc_client_defaults.lock().unwrap();
+        *default_guard = defaults;
+        if let Err(err) = persist_opc_client_defaults(&state.opc_defaults_path, &default_guard) {
+            warn!("Failed to persist resolved controller defaults after start: {}", err);
         }
     }
 
     info!("   -> Targeting OPC Server: {}", opc_url);
     info!("   -> OPC Auth Mode: {}", auth_mode);
+    info!("   -> OPC Security Policy: {}", security_policy);
+    info!("   -> OPC Message Mode: {}", message_mode);
     info!("   -> Using PKI: {:?}", state.pki_dir);
 
     // Prepare Log File
@@ -333,6 +493,10 @@ async fn start_controller(
         .arg(&state.pki_dir)
         .arg("--auth-mode")
         .arg(&auth_mode)
+        .arg("--security-policy")
+        .arg(&security_policy)
+        .arg("--message-mode")
+        .arg(&message_mode)
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(log_file_err));
 
@@ -388,6 +552,83 @@ async fn start_controller(
             (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response()
         }
     }
+}
+
+fn load_opc_client_defaults(path: &PathBuf) -> Option<OpcClientDefaults> {
+    let content = std::fs::read_to_string(path).ok()?;
+
+    if content.trim_start().starts_with('{') {
+        return serde_json::from_str::<OpcClientDefaults>(&content).ok();
+    }
+
+    let mut values: HashMap<String, String> = HashMap::new();
+    for raw_line in content.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        if let Some((key, value)) = line.split_once('=') {
+            values.insert(key.trim().to_string(), value.trim().to_string());
+        }
+    }
+
+    let opc_url = values.get("OPC_URL")?.clone();
+    let auth_mode = values.get("AUTH_MODE")?.clone();
+    let security_policy = values.get("SECURITY_POLICY")?.clone();
+    let message_mode = values.get("MESSAGE_MODE")?.clone();
+
+    let username = values
+        .get("USERNAME")
+        .filter(|value| !value.trim().is_empty())
+        .cloned();
+    let password = values
+        .get("PASSWORD")
+        .filter(|value| !value.trim().is_empty())
+        .cloned();
+
+    Some(OpcClientDefaults {
+        opc_url,
+        auth_mode,
+        username,
+        password,
+        security_policy,
+        message_mode,
+    })
+}
+
+fn persist_opc_client_defaults(path: &PathBuf, defaults: &OpcClientDefaults) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create parent dir failed: {}", e))?;
+    }
+
+    let sanitize = |value: &str| value.replace('\n', "").replace('\r', "");
+    let mut payload = String::new();
+    payload.push_str("# Controller Host OPC client defaults\n");
+    payload.push_str(&format!("OPC_URL={}\n", sanitize(&defaults.opc_url)));
+    payload.push_str(&format!("AUTH_MODE={}\n", sanitize(&defaults.auth_mode)));
+    payload.push_str(&format!("SECURITY_POLICY={}\n", sanitize(&defaults.security_policy)));
+    payload.push_str(&format!("MESSAGE_MODE={}\n", sanitize(&defaults.message_mode)));
+    payload.push_str(&format!(
+        "USERNAME={}\n",
+        defaults
+            .username
+            .as_deref()
+            .map(sanitize)
+            .unwrap_or_default()
+    ));
+    payload.push_str(&format!(
+        "PASSWORD={}\n",
+        defaults
+            .password
+            .as_deref()
+            .map(sanitize)
+            .unwrap_or_default()
+    ));
+
+    std::fs::write(path, payload).map_err(|e| format!("write defaults failed: {}", e))?;
+    Ok(())
 }
 
 async fn stop_controller(

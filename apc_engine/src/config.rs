@@ -271,6 +271,8 @@ pub struct AppSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct OpcuaConfig {
     pub endpoint_url: String,
+    pub security_policy: String,
+    pub message_mode: String,
     pub namespace_index: u16,
 }
 

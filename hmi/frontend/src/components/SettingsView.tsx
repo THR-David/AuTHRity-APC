@@ -1,17 +1,44 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Plus, Trash2, Server, Network, Users, UserPlus, KeyRound, UserCog, ClipboardList, Download } from 'lucide-react';
+import { Plus, Trash2, Server, Network, Users, UserPlus, KeyRound, UserCog, ClipboardList, Download } from 'lucide-react';
 import { apiFetch, type UserRole } from '../lib/api';
+import { useTagStore } from '../store/tagStore';
 
 export interface ServiceConfig {
     id: string;
     name: string;
     url: string;
     opc_endpoint?: string;
+    security_policy?: string;
+    security_mode?: string;
+    auth_mode?: string;
+}
+
+interface HmiClientSettings {
+    security_policy: string;
+    security_mode: string;
+    auth_mode: string;
+    username_ref?: string;
+    cert_ref?: string;
+    username?: string;
+    password?: string;
+}
+
+interface ControllerHostClientSettings {
+    supervisor_id: string;
+    security_policy: string;
+    security_mode: string;
+    auth_mode: string;
+    username_ref?: string;
+    cert_ref?: string;
+    username?: string;
+    password?: string;
 }
 
 interface InfrastructureConfig {
     supervisors: ServiceConfig[];
     opc_servers: ServiceConfig[];
+    hmi_client?: HmiClientSettings;
+    controller_host_clients?: ControllerHostClientSettings[];
 }
 
 interface ManagedUser {
@@ -34,12 +61,41 @@ interface AuditEvent {
 }
 
 const roleOptions: UserRole[] = ['viewer', 'operator', 'engineer', 'admin'];
+const securityPolicyOptions = ['None', 'Basic256Sha256'];
+const securityModeOptions = ['None', 'Sign', 'SignAndEncrypt'];
 
-export const SettingsView: React.FC = () => {
+const defaultHmiClientSettings: HmiClientSettings = {
+    security_policy: 'Basic256Sha256',
+    security_mode: 'SignAndEncrypt',
+    auth_mode: 'Username',
+    username_ref: 'hmi_client_default',
+    cert_ref: undefined,
+    username: undefined,
+    password: undefined,
+};
+
+const defaultControllerHostClient = (supervisorId: string): ControllerHostClientSettings => ({
+    supervisor_id: supervisorId,
+    security_policy: defaultHmiClientSettings.security_policy,
+    security_mode: defaultHmiClientSettings.security_mode,
+    auth_mode: defaultHmiClientSettings.auth_mode,
+    username_ref: `controller_host_${supervisorId}`,
+    cert_ref: undefined,
+    username: undefined,
+    password: undefined,
+});
+
+interface SettingsViewProps {
+    isAdmin: boolean;
+}
+
+export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
     const [activeTab, setActiveTab] = useState<'Infrastructure' | 'Users' | 'Audit'>('Infrastructure');
 
     const [supervisors, setSupervisors] = useState<ServiceConfig[]>([]);
     const [opcServers, setOpcServers] = useState<ServiceConfig[]>([]);
+    const [hmiClient, setHmiClient] = useState<HmiClientSettings>(defaultHmiClientSettings);
+    const [controllerHostClients, setControllerHostClients] = useState<ControllerHostClientSettings[]>([]);
     const [infraStatus, setInfraStatus] = useState<string>('');
 
     const [users, setUsers] = useState<ManagedUser[]>([]);
@@ -55,12 +111,27 @@ export const SettingsView: React.FC = () => {
     const [auditAction, setAuditAction] = useState('');
     const [auditResult, setAuditResult] = useState('');
     const [auditLimit, setAuditLimit] = useState(200);
+    const opcConnection = useTagStore((state) => state.tags['System:PlcConnection']?.value);
+    const opcAuthError = useTagStore((state) => state.tags['System:PlcAuthError']?.value);
+    const opcLastError = useTagStore((state) => state.tags['System:PlcLastError']?.value);
+
+    const visibleTabs: Array<'Infrastructure' | 'Users' | 'Audit'> = isAdmin
+        ? ['Infrastructure', 'Users', 'Audit']
+        : ['Infrastructure'];
 
     useEffect(() => {
         fetchSettings();
-        fetchUsers();
-        fetchAudit();
-    }, []);
+        if (isAdmin) {
+            fetchUsers();
+            fetchAudit();
+        }
+    }, [isAdmin]);
+
+    useEffect(() => {
+        if (!visibleTabs.includes(activeTab)) {
+            setActiveTab('Infrastructure');
+        }
+    }, [activeTab, visibleTabs]);
 
     const fetchAudit = async () => {
         try {
@@ -100,35 +171,83 @@ export const SettingsView: React.FC = () => {
             const res = await apiFetch('/api/infrastructure');
             if (res.ok) {
                 const data: InfrastructureConfig = await res.json();
-                setSupervisors(data.supervisors);
+                const supervisorList = data.supervisors;
+                setSupervisors(supervisorList);
                 setOpcServers(data.opc_servers);
+                setHmiClient(data.hmi_client || defaultHmiClientSettings);
+                const savedClients = data.controller_host_clients || [];
+                const mergedClients = supervisorList.map(sup => (
+                    savedClients.find(client => client.supervisor_id === sup.id) || defaultControllerHostClient(sup.id)
+                ));
+                setControllerHostClients(mergedClients);
             } else {
-                setInfraStatus('❌ Failed to load infrastructure settings');
+                const detail = await res.text();
+                setInfraStatus(`❌ Failed to load infrastructure settings: ${detail || res.statusText}`);
             }
         } catch (e) {
             setInfraStatus(`❌ Connection error: ${e}`);
         }
     };
 
-    const saveSettings = async () => {
-        setInfraStatus('Saving...');
+    const saveControllerHostClients = async () => {
+        setInfraStatus('Saving Controller Host OPC UA client settings...');
+
+        try {
+            const res = await apiFetch('/api/infrastructure/controller-host-clients', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    supervisors,
+                    controller_host_clients: controllerHostClients,
+                }),
+            }, true);
+
+            if (res.ok) {
+                setInfraStatus('✅ Controller Host OPC UA client settings saved and synced');
+            } else {
+                setInfraStatus(`❌ Save failed: ${await res.text()}`);
+            }
+        } catch (e) {
+            setInfraStatus(`❌ Error: ${e}`);
+        }
+    };
+
+    const saveHmiClientSettings = async (reconnectAfterSave: boolean) => {
+        setInfraStatus(reconnectAfterSave ? 'Saving and applying HMI OPC UA client settings...' : 'Saving HMI OPC UA client settings...');
         const payload: InfrastructureConfig = {
             supervisors,
             opc_servers: opcServers,
+            hmi_client: hmiClient,
+            controller_host_clients: controllerHostClients,
         };
 
         try {
-            const res = await apiFetch('/api/infrastructure', {
+            const saveRes = await apiFetch('/api/infrastructure', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload),
             }, true);
 
-            if (res.ok) {
-                setInfraStatus('✅ Infrastructure settings saved');
-            } else {
-                setInfraStatus(`❌ Save failed: ${await res.text()}`);
+            if (!saveRes.ok) {
+                setInfraStatus(`❌ Save failed: ${await saveRes.text()}`);
+                return;
             }
+
+            if (reconnectAfterSave) {
+                const reconnectRes = await apiFetch('/api/infrastructure/opc-reconnect', {
+                    method: 'POST',
+                }, true);
+
+                if (!reconnectRes.ok) {
+                    setInfraStatus(`⚠️ Saved, but reconnect failed: ${await reconnectRes.text()}`);
+                    return;
+                }
+
+                setInfraStatus('✅ HMI OPC UA client settings saved and reconnect requested');
+                return;
+            }
+
+            setInfraStatus('✅ HMI OPC UA client settings saved');
         } catch (e) {
             setInfraStatus(`❌ Error: ${e}`);
         }
@@ -234,14 +353,19 @@ export const SettingsView: React.FC = () => {
     const addSupervisor = () => {
         const newSup = { id: crypto.randomUUID(), name: 'New Supervisor', url: 'http://127.0.0.1:8080' };
         setSupervisors([...supervisors, newSup]);
+        setControllerHostClients([...controllerHostClients, defaultControllerHostClient(newSup.id)]);
     };
 
     const addOpc = () => {
+        const primary = opcServers[0];
         const newOpc = {
             id: crypto.randomUUID(),
             name: 'New OPC Server',
             url: 'http://127.0.0.1:9090',
-            opc_endpoint: 'opc.tcp://127.0.0.1:4840',
+            opc_endpoint: 'opc.tcp://localhost:4855',
+            security_policy: primary?.security_policy || hmiClient.security_policy,
+            security_mode: primary?.security_mode || hmiClient.security_mode,
+            auth_mode: primary?.auth_mode || hmiClient.auth_mode,
         };
         setOpcServers([...opcServers, newOpc]);
     };
@@ -256,10 +380,21 @@ export const SettingsView: React.FC = () => {
 
     const removeSupervisor = (id: string) => {
         setSupervisors(supervisors.filter(s => s.id !== id));
+        setControllerHostClients(controllerHostClients.filter(client => client.supervisor_id !== id));
     };
 
     const removeOpc = (id: string) => {
         setOpcServers(opcServers.filter(s => s.id !== id));
+    };
+
+    const updateHmiClient = (field: keyof HmiClientSettings, value: string) => {
+        setHmiClient(prev => ({ ...prev, [field]: value }));
+    };
+
+    const updateControllerHostClient = (supervisorId: string, field: keyof ControllerHostClientSettings, value: string) => {
+        setControllerHostClients(prev => prev.map(client => (
+            client.supervisor_id === supervisorId ? { ...client, [field]: value } : client
+        )));
     };
 
     return (
@@ -276,7 +411,7 @@ export const SettingsView: React.FC = () => {
                     </div>
                 </div>
                 <div className="px-4 py-2 flex gap-2 bg-slate-950/70 border-b border-slate-800">
-                    {(['Infrastructure', 'Users', 'Audit'] as const).map(tab => (
+                    {visibleTabs.map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -299,13 +434,13 @@ export const SettingsView: React.FC = () => {
             {activeTab === 'Infrastructure' && (
                 <>
                     <div className="text-sm font-bold text-center mb-2">
-                        {infraStatus && <span className={infraStatus.includes('✅') ? 'text-emerald-400' : 'text-rose-400'}>{infraStatus}</span>}
+                        {infraStatus && <span className={infraStatus.includes('✅') ? 'text-indigo-300' : 'text-slate-300'}>{infraStatus}</span>}
                     </div>
 
                     <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
                         <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30 flex justify-between items-center">
                             <h3 className="font-bold text-indigo-300 text-sm uppercase flex items-center gap-2">
-                                <Server size={16}/> Supervisor Registry
+                                <Server size={16}/> Controller Host Registry
                             </h3>
                             <button onClick={addSupervisor} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded flex items-center gap-1">
                                 <Plus size={12}/> Add
@@ -318,15 +453,15 @@ export const SettingsView: React.FC = () => {
                                         value={sup.name}
                                         onChange={(e) => updateSupervisor(sup.id, 'name', e.target.value)}
                                         className="bg-transparent border-b border-slate-600 text-slate-200 text-xs w-1/3 focus:outline-none focus:border-indigo-500 px-1 py-1"
-                                        placeholder="Supervisor Name"
+                                        placeholder="Controller Host Name"
                                     />
                                     <input
                                         value={sup.url}
                                         onChange={(e) => updateSupervisor(sup.id, 'url', e.target.value)}
                                         className="bg-transparent border-b border-slate-600 text-indigo-300 font-mono text-xs flex-1 focus:outline-none focus:border-indigo-500 px-1 py-1"
-                                        placeholder="Management URL (http://...)"
+                                        placeholder="Controller Host URL (http://...)"
                                     />
-                                    <button onClick={() => removeSupervisor(sup.id)} className="text-slate-500 hover:text-rose-400">
+                                    <button onClick={() => removeSupervisor(sup.id)} className="text-slate-500 hover:text-indigo-300">
                                         <Trash2 size={14}/>
                                     </button>
                                 </div>
@@ -334,12 +469,12 @@ export const SettingsView: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="bg-slate-900/50 rounded-xl border-2 border-cyan-900/30 overflow-hidden shadow-lg">
-                        <div className="bg-cyan-900/20 px-4 py-2 border-b border-cyan-900/30 flex justify-between items-center">
-                            <h3 className="font-bold text-cyan-300 text-sm uppercase flex items-center gap-2">
-                                <Network size={16}/> OPC UA Connectivity Nodes
+                    <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
+                        <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30 flex justify-between items-center">
+                            <h3 className="font-bold text-indigo-300 text-sm uppercase flex items-center gap-2">
+                                <Network size={16}/> OPC UA Servers
                             </h3>
-                            <button onClick={addOpc} className="text-xs bg-cyan-600 hover:bg-cyan-500 text-white px-2 py-1 rounded flex items-center gap-1">
+                            <button onClick={addOpc} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded flex items-center gap-1">
                                 <Plus size={12}/> Add
                             </button>
                         </div>
@@ -350,22 +485,22 @@ export const SettingsView: React.FC = () => {
                                         <input
                                             value={opc.name}
                                             onChange={(e) => updateOpc(opc.id, 'name', e.target.value)}
-                                            className="bg-transparent border-b border-slate-600 text-slate-200 text-xs flex-1 focus:outline-none focus:border-cyan-500 px-1 py-1"
+                                            className="bg-transparent border-b border-slate-600 text-slate-200 text-xs flex-1 focus:outline-none focus:border-indigo-500 px-1 py-1"
                                         />
-                                        <button onClick={() => removeOpc(opc.id)} className="text-slate-500 hover:text-rose-400">
+                                        <button onClick={() => removeOpc(opc.id)} className="text-slate-500 hover:text-indigo-300">
                                             <Trash2 size={14}/>
                                         </button>
                                     </div>
                                     <input
                                         value={opc.url}
                                         onChange={(e) => updateOpc(opc.id, 'url', e.target.value)}
-                                        className="w-full bg-transparent border-b border-slate-600 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500 px-1 py-1"
+                                        className="w-full bg-transparent border-b border-slate-600 text-indigo-300 font-mono text-xs focus:outline-none focus:border-indigo-500 px-1 py-1"
                                         placeholder="http://host:port"
                                     />
                                     <input
                                         value={opc.opc_endpoint || ''}
                                         onChange={(e) => updateOpc(opc.id, 'opc_endpoint', e.target.value)}
-                                        className="w-full bg-transparent border-b border-slate-600 text-emerald-300 font-mono text-xs focus:outline-none focus:border-emerald-500 px-1 py-1"
+                                        className="w-full bg-transparent border-b border-slate-600 text-indigo-300 font-mono text-xs focus:outline-none focus:border-indigo-500 px-1 py-1"
                                         placeholder="opc.tcp://host:port"
                                     />
                                 </div>
@@ -373,29 +508,215 @@ export const SettingsView: React.FC = () => {
                         </div>
                     </div>
 
-                    <button
-                        onClick={saveSettings}
-                        className="w-full py-3 bg-gradient-to-r from-emerald-600 to-emerald-500 hover:from-emerald-500 hover:to-emerald-400 text-white font-bold rounded shadow-lg shadow-emerald-900/30 transition-all flex justify-center items-center gap-2"
-                    >
-                        <Save size={18} /> Save Infrastructure
-                    </button>
+                    <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
+                        <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30">
+                            <h3 className="font-bold text-indigo-300 text-sm uppercase">HMI OPC UA Client</h3>
+                        </div>
+                        <div className="p-4 space-y-3">
+                            <div className="text-xs rounded px-3 py-2 border border-slate-700 bg-slate-950/50">
+                                <span className="text-slate-300">Connection: </span>
+                                <span className={Number(opcConnection) === 1 ? 'text-indigo-300' : 'text-slate-400'}>
+                                    {Number(opcConnection) === 1 ? 'Connected' : 'Disconnected'}
+                                </span>
+                            </div>
+
+                            {typeof opcLastError === 'string' && opcLastError.trim().length > 0 && (
+                                <div className="text-xs text-slate-300 bg-slate-900/70 border border-slate-700 rounded px-3 py-2">
+                                    ⚠️ Last OPC error: {opcLastError}
+                                </div>
+                            )}
+
+                            {Number(opcAuthError) === 1 && (
+                                <div className="text-xs text-slate-300 bg-slate-900/70 border border-indigo-800 rounded px-3 py-2">
+                                    ❌ OPC authentication failed. Check HMI OPC UA username/password or auth mode.
+                                    {typeof opcLastError === 'string' && opcLastError.trim().length > 0 && (
+                                        <div className="text-slate-400 mt-1">{opcLastError}</div>
+                                    )}
+                                </div>
+                            )}
+
+                            <div className="flex flex-wrap gap-3">
+                                <div className="space-y-1">
+                                    <label className="text-xs text-slate-300">Security Policy </label>
+                                    <select
+                                        value={hmiClient.security_policy}
+                                        onChange={(e) => updateHmiClient('security_policy', e.target.value)}
+                                        className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                    >
+                                        {securityPolicyOptions.map(option => (
+                                            <option key={option} value={option}>{option}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs text-slate-300">Security Mode </label>
+                                    <select
+                                        value={hmiClient.security_mode}
+                                        onChange={(e) => updateHmiClient('security_mode', e.target.value)}
+                                        className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                    >
+                                        {securityModeOptions.map(option => (
+                                            <option key={option} value={option}>{option}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div className="space-y-1">
+                                    <label className="text-xs text-slate-300">Auth Mode </label>
+                                    <select
+                                        value={hmiClient.auth_mode}
+                                        onChange={(e) => updateHmiClient('auth_mode', e.target.value)}
+                                        className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                    >
+                                        <option value="Anonymous">Anonymous</option>
+                                        <option value="Username">Username/Password</option>
+                                        <option value="X509">X509 Certificate</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            {hmiClient.auth_mode === 'Username' && (
+                                <div className="flex flex-wrap gap-3">
+                                    <div className="space-y-1">
+                                        <label className="text-xs text-slate-300">Username </label>
+                                        <input
+                                            value={hmiClient.username || ''}
+                                            onChange={(e) => updateHmiClient('username', e.target.value)}
+                                            className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                            placeholder="OPC Username"
+                                        />
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-xs text-slate-300">Password </label>
+                                        <input
+                                            type="password"
+                                            value={hmiClient.password || ''}
+                                            onChange={(e) => updateHmiClient('password', e.target.value)}
+                                            className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                            placeholder="OPC Password"
+                                        />
+                                    </div>
+                                </div>
+                            )}
+
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={() => saveHmiClientSettings(true)}
+                                    className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded"
+                                >
+                                    Save & Reconnect
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
+                        <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30">
+                            <h3 className="font-bold text-indigo-300 text-sm uppercase">Controller Host OPC UA Clients</h3>
+                        </div>
+                        <div className="p-4 space-y-4">
+                            {supervisors.map((supervisor, index) => {
+                                const hostClient = controllerHostClients.find(client => client.supervisor_id === supervisor.id)
+                                    || defaultControllerHostClient(supervisor.id);
+                                return (
+                                <div key={supervisor.id} className="space-y-2">
+                                    <div className="text-xs font-bold text-slate-200 uppercase">{supervisor.name || 'Controller Host'} OPC UA Client</div>
+                                    <div className="flex flex-wrap gap-3">
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-300">Security Policy </label>
+                                            <select
+                                                value={hostClient.security_policy}
+                                                onChange={(e) => updateControllerHostClient(supervisor.id, 'security_policy', e.target.value)}
+                                                className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                            >
+                                                {securityPolicyOptions.map(option => (
+                                                    <option key={option} value={option}>{option}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-300">Security Mode </label>
+                                            <select
+                                                value={hostClient.security_mode}
+                                                onChange={(e) => updateControllerHostClient(supervisor.id, 'security_mode', e.target.value)}
+                                                className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                            >
+                                                {securityModeOptions.map(option => (
+                                                    <option key={option} value={option}>{option}</option>
+                                                ))}
+                                            </select>
+                                        </div>
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-slate-300">Auth Mode </label>
+                                            <select
+                                                value={hostClient.auth_mode}
+                                                onChange={(e) => updateControllerHostClient(supervisor.id, 'auth_mode', e.target.value)}
+                                                className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                            >
+                                                <option value="Anonymous">Anonymous</option>
+                                                <option value="Username">Username/Password</option>
+                                                <option value="X509">X509 Certificate</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    {hostClient.auth_mode === 'Username' && (
+                                        <div className="flex flex-wrap gap-3">
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-slate-300">Username </label>
+                                                <input
+                                                    value={hostClient.username || ''}
+                                                    onChange={(e) => updateControllerHostClient(supervisor.id, 'username', e.target.value)}
+                                                    className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                                    placeholder="OPC Username"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-slate-300">Password </label>
+                                                <input
+                                                    type="password"
+                                                    value={hostClient.password || ''}
+                                                    onChange={(e) => updateControllerHostClient(supervisor.id, 'password', e.target.value)}
+                                                    className="w-56 bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                                    placeholder="OPC Password"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {index < supervisors.length - 1 && (
+                                        <div className="pt-2 border-b border-slate-700/60" />
+                                    )}
+                                </div>
+                            )})}
+
+                            <div className="flex gap-2 pt-2">
+                                <button
+                                    onClick={saveControllerHostClients}
+                                    className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded"
+                                >
+                                    Save
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
                 </>
             )}
 
             {activeTab === 'Users' && (
                 <>
                     <div className="text-sm font-bold text-center mb-2">
-                        {usersStatus && <span className={usersStatus.includes('✅') ? 'text-emerald-400' : 'text-rose-400'}>{usersStatus}</span>}
+                        {usersStatus && <span className={usersStatus.includes('✅') ? 'text-indigo-300' : 'text-slate-300'}>{usersStatus}</span>}
                     </div>
 
                     <div className="text-xs text-slate-400 text-center -mt-1 mb-2">
                         Users can change their own password from the account panel. This section is for admin reset/recovery.
                     </div>
 
-                    <div className="bg-slate-900/50 rounded-xl border-2 border-violet-900/30 overflow-hidden shadow-lg">
-                        <div className="bg-violet-900/20 px-4 py-2 border-b border-violet-900/30 flex items-center gap-2">
-                            <UserPlus size={16} className="text-violet-300"/>
-                            <h3 className="font-bold text-violet-300 text-sm uppercase">Add User</h3>
+                    <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
+                        <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30 flex items-center gap-2">
+                            <UserPlus size={16} className="text-indigo-300"/>
+                            <h3 className="font-bold text-indigo-300 text-sm uppercase">Add User</h3>
                         </div>
                         <div className="p-4 grid grid-cols-4 gap-2">
                             <input
@@ -422,7 +743,7 @@ export const SettingsView: React.FC = () => {
                             </select>
                             <button
                                 onClick={createUser}
-                                className="bg-violet-600 hover:bg-violet-500 rounded text-white font-bold text-sm"
+                                className="bg-indigo-600 hover:bg-indigo-500 rounded text-white font-bold text-sm"
                             >
                                 Create
                             </button>
@@ -453,7 +774,7 @@ export const SettingsView: React.FC = () => {
                                     <div className="col-span-2">
                                         <button
                                             onClick={() => setDisabled(u.id, !u.disabled)}
-                                            className={`w-full text-xs rounded px-2 py-1 ${u.disabled ? 'bg-emerald-700 hover:bg-emerald-600' : 'bg-rose-700 hover:bg-rose-600'} text-white`}
+                                            className={`w-full text-xs rounded px-2 py-1 ${u.disabled ? 'bg-indigo-700 hover:bg-indigo-600' : 'bg-slate-700 hover:bg-slate-600'} text-white`}
                                         >
                                             {u.disabled ? 'Enable' : 'Disable'}
                                         </button>
@@ -470,7 +791,7 @@ export const SettingsView: React.FC = () => {
                                     <div className="col-span-1">
                                         <button
                                             onClick={() => resetPassword(u.id)}
-                                            className="w-full bg-amber-700 hover:bg-amber-600 text-white rounded px-2 py-1"
+                                            className="w-full bg-indigo-700 hover:bg-indigo-600 text-white rounded px-2 py-1"
                                             title="Admin reset password"
                                         >
                                             <KeyRound size={12}/>
@@ -486,17 +807,17 @@ export const SettingsView: React.FC = () => {
             {activeTab === 'Audit' && (
                 <>
                     <div className="text-sm font-bold text-center mb-2">
-                        {auditStatus && <span className={auditStatus.includes('✅') ? 'text-emerald-400' : 'text-rose-400'}>{auditStatus}</span>}
+                        {auditStatus && <span className={auditStatus.includes('✅') ? 'text-indigo-300' : 'text-slate-300'}>{auditStatus}</span>}
                     </div>
 
-                    <div className="bg-slate-900/50 rounded-xl border-2 border-amber-900/30 overflow-hidden shadow-lg">
-                        <div className="bg-amber-900/20 px-4 py-2 border-b border-amber-900/30 flex justify-between items-center">
-                            <h3 className="font-bold text-amber-300 text-sm uppercase inline-flex items-center gap-2">
+                    <div className="bg-slate-900/50 rounded-xl border-2 border-indigo-900/30 overflow-hidden shadow-lg">
+                        <div className="bg-indigo-900/20 px-4 py-2 border-b border-indigo-900/30 flex justify-between items-center">
+                            <h3 className="font-bold text-indigo-300 text-sm uppercase inline-flex items-center gap-2">
                                 <ClipboardList size={14}/> Audit Events
                             </h3>
                             <div className="flex items-center gap-2">
                                 <button onClick={fetchAudit} className="text-xs bg-slate-700 hover:bg-slate-600 px-2 py-1 rounded">Refresh</button>
-                                <button onClick={exportAuditJson} className="text-xs bg-amber-700 hover:bg-amber-600 px-2 py-1 rounded text-white inline-flex items-center gap-1">
+                                <button onClick={exportAuditJson} className="text-xs bg-indigo-700 hover:bg-indigo-600 px-2 py-1 rounded text-white inline-flex items-center gap-1">
                                     <Download size={12}/> Export
                                 </button>
                             </div>
@@ -532,7 +853,7 @@ export const SettingsView: React.FC = () => {
                                     min={1}
                                     max={1000}
                                 />
-                                <button onClick={fetchAudit} className="bg-amber-700 hover:bg-amber-600 rounded text-white font-bold text-xs">
+                                <button onClick={fetchAudit} className="bg-indigo-700 hover:bg-indigo-600 rounded text-white font-bold text-xs">
                                     Apply
                                 </button>
                             </div>
