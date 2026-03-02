@@ -42,4 +42,4 @@ flush_interval_ms = 1000
 snapshot_interval_sec = 60  # Log all nodes every 60 seconds (even if unchanged)
 
 [hmi_auth]
-database_url = "sqlite:config/hmi_auth.db"
+database_url = "sqlite:config/hmi.db"

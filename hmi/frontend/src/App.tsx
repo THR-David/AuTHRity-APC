@@ -71,6 +71,7 @@ function App() {
   const [activeTab, setActiveTab] = useState("Overview");  
 
   const [dataStale, setDataStale] = useState(false);
+    const [controllerRunning, setControllerRunning] = useState<boolean | null>(null);
 
   const ws = useRef<WebSocket | null>(null);
 
@@ -270,11 +271,66 @@ function App() {
             } else {
                 setDataStale(false);
             }
+        } else {
+            setDataStale(true);
         }
     }, 5000);
 
     return () => clearInterval(interval);
   }, [systemPrefix]);
+
+    // 5. CONTROLLER RUNNING STATUS (from /api/prox/controllers)
+    useEffect(() => {
+        if (!authenticated) return;
+
+        const isControllerView = activeModel !== "Generator" && activeModel !== "Plant Overview" && activeModel !== "Settings";
+        if (!isControllerView) {
+            setControllerRunning(null);
+            return;
+        }
+
+        const parseIsRunning = (state: any): boolean => {
+            if (typeof state === 'string') {
+                return state.toLowerCase() === 'running';
+            }
+            if (state && typeof state === 'object') {
+                return Object.prototype.hasOwnProperty.call(state, 'Running');
+            }
+            return false;
+        };
+
+        let isCancelled = false;
+
+        const refreshControllerState = async () => {
+            try {
+                const res = await fetch('/api/prox/controllers');
+                if (!res.ok) return;
+
+                const controllers = await res.json();
+                if (isCancelled || !Array.isArray(controllers)) return;
+
+                const target = controllers.find((controller: any) =>
+                    controller?.id === activeModel || (systemPrefix && controller?.id === systemPrefix)
+                );
+
+                if (!target) {
+                    setControllerRunning(false);
+                    return;
+                }
+
+                setControllerRunning(parseIsRunning(target.state));
+            } catch {
+            }
+        };
+
+        refreshControllerState();
+        const interval = setInterval(refreshControllerState, 5000);
+
+        return () => {
+            isCancelled = true;
+            clearInterval(interval);
+        };
+    }, [authenticated, activeModel, systemPrefix]);
 
   const handleWrite = (nodeId: string, newValue: string | number | boolean) => {
         if (!hasRoleAtLeast(role, 'operator')) return;
@@ -294,7 +350,21 @@ function App() {
 
   const getStatusColor = () => {
     if (!wsConnected) return "bg-red-500"; 
-    if (dataStale) return "bg-amber-500 animate-pulse";
+
+        if (systemPrefix) {
+            if (controllerRunning === false) return "bg-red-500";
+            if (controllerRunning === null) return "bg-amber-500 animate-pulse";
+
+            const heartbeatNode = `${systemPrefix}:Heartbeat`;
+            const tag = useTagStore.getState().tags[heartbeatNode];
+            if (!tag) return "bg-amber-500 animate-pulse";
+
+            const ageMs = Date.now() - new Date(tag.timestamp).getTime();
+            if (ageMs > 10000 || dataStale) return "bg-amber-500 animate-pulse";
+            return "bg-emerald-500";
+        }
+
+        if (dataStale) return "bg-amber-500 animate-pulse";
     const plcStatus = useTagStore.getState().tags["System:PlcConnection"]?.value;
     if (plcStatus === 1) return "bg-emerald-500"; 
     return "bg-amber-500 animate-pulse"; 
@@ -302,7 +372,21 @@ function App() {
 
   const getStatusText = () => {
       if (!wsConnected) return "Server Disconnected";
-      if (dataStale) return "Data Stale (Heartbeat Lost)";
+
+            if (systemPrefix) {
+          if (controllerRunning === false) return "System Offline";
+          if (controllerRunning === null) return "Checking controller...";
+
+                    const heartbeatNode = `${systemPrefix}:Heartbeat`;
+                    const tag = useTagStore.getState().tags[heartbeatNode];
+          if (!tag) return "Data Stale (Heartbeat Lost)";
+
+                    const ageMs = Date.now() - new Date(tag.timestamp).getTime();
+                    if (ageMs > 10000 || dataStale) return "Data Stale (Heartbeat Lost)";
+                    return "System Online";
+            }
+
+            if (dataStale) return "Data Stale (Heartbeat Lost)";
       const plcStatus = useTagStore.getState().tags["System:PlcConnection"]?.value;
       if (plcStatus === 1) return "System Online";
       return "Connecting to PLC...";
@@ -389,7 +473,21 @@ function App() {
 
         try {
             await apiChangePassword(forcePasswordChange ? '' : currentPassword, newPassword.trim());
-            setForcePasswordChange(false);
+            const me = await apiMe();
+            if (!me.authenticated || !me.username || !me.role) {
+                setAuthenticated(false);
+                setUsername('');
+                setRole('viewer');
+                setForcePasswordChange(false);
+                setShowPasswordDialog(false);
+                setPasswordStatus('✅ Password changed. Please sign in again.');
+                return;
+            }
+
+            setAuthenticated(true);
+            setUsername(me.username);
+            setRole(me.role);
+            setForcePasswordChange(me.force_password_change);
             setShowPasswordDialog(false);
             setCurrentPassword('');
             setNewPassword('');
@@ -437,7 +535,7 @@ function App() {
                 activeModel={activeModel}
                 onSelect={setActiveModel}
                 allowGenerator={canEngineer}
-                allowSettings={canAdmin}
+                allowSettings={canEngineer}
                 username={username}
                 role={role}
                 onChangePassword={openChangePassword}
@@ -450,7 +548,7 @@ function App() {
         {activeModel === "Generator" ? (
             canEngineer ? <ModelGenerator /> : <div className="h-full flex items-center justify-center text-slate-500">Forbidden</div>
         ) : activeModel === "Settings" ? (
-            canAdmin ? <SettingsView /> : <div className="h-full flex items-center justify-center text-slate-500">Forbidden</div>
+            canEngineer ? <SettingsView isAdmin={canAdmin} /> : <div className="h-full flex items-center justify-center text-slate-500">Forbidden</div>
         ) : activeModel === "Plant Overview" ? (
             <PlantOverview wsRef={ws} onSelectModel={setActiveModel} />
         ) : (

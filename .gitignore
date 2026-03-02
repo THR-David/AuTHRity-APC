@@ -36,7 +36,8 @@ ehthumbs.db
 portable/
 logs/
 deployment/artifacts/
-hmi/config/hmi_auth.db
+hmi/config/hmi.db
+controller_host/config/opc_client.env
 
 # Private Keys / Certs (Security!)
 **/pki/**

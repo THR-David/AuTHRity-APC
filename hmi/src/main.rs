@@ -61,6 +61,12 @@ async fn main() -> Result<()> {
         .ensure_bootstrap_admin("admin", "password")
         .await;
 
+    infrastructure::InfrastructureConfig::seed_if_empty(
+        &settings.hmi_auth.database_url,
+        "config/hosts.json",
+    )
+    .await?;
+
     // We store 'cmd_tx' here so the web routes can send commands
     let app_state = AppState {
         tx,
@@ -104,6 +110,8 @@ async fn main() -> Result<()> {
         .route("/api/stepresponse/calculate", post(web_routes::calculate_step_response))
         .route("/api/deploy", post(web_routes::deploy_bundle)) // <--- Atomic Deployment Route
         .route("/api/infrastructure", get(web_routes::get_infrastructure).post(web_routes::save_infrastructure)) // <--- Infrastructure Registry
+        .route("/api/infrastructure/controller-host-clients", post(web_routes::save_controller_host_clients))
+        .route("/api/infrastructure/opc-reconnect", post(web_routes::reconnect_opc_worker))
         .route("/api/physics/:id", get(web_routes::get_remote_physics)) // <--- Fetch JSON from Supervisor
         // NEW: Controller Management Proxy
         .route("/api/prox/controllers", get(web_routes::list_controllers_proxy))

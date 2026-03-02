@@ -16,6 +16,11 @@ This system provides a practical path from model to closed-loop execution:
 
 The design separates concerns across services so control logic, supervision, simulation, and UI can evolve independently while sharing a consistent tag model.
 
+## Node-RED Bridge (Optional)
+
+Node-RED can be used as an OPC UA ⇄ OPC DA translation layer between AuTHRity and legacy DCS systems.
+This provides a practical way to handle mode handshakes and write mapping without building a custom bridge service.
+
 ## Architecture Overview
 
 ```
