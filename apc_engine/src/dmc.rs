@@ -629,11 +629,6 @@ impl DmcController {
             q_vec[i] = 0.0;
         }
         
-        // 🔍 DEBUG: Show error and gradient
-        println!("🔍 DMC DEBUG: Error vector (first 5): {:?}", &error_vec.as_slice()[0..5]);
-        println!("🔍 DMC DEBUG: Weighted error (first 5): {:?}", &weighted_error.as_slice()[0..5]);
-        println!("🔍 DMC DEBUG: Q weights (first 5): {:?}", &self.q_diagonal.as_slice()[0..5]);
-        println!("🔍 DMC DEBUG: Q gradient (first 2 MVs): [{:.6}, {:.6}]", q_vec.as_slice()[0], q_vec.as_slice()[1]);
         
         // MV economic terms and dynamic MV move suppression
         // We build a per-scan Hessian so OPC-updated MV weights are fully active.

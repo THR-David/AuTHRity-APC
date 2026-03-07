@@ -37,7 +37,6 @@ Build-RustProject "DMC Engine" "apc_engine"
 Build-RustProject "HMI Backend" "hmi"
 Build-RustProject "Virtual Plant" "virtual_plant"
 Build-RustProject "Controller Host" "controller_host"
-Build-RustProject "AuTHRity Bridge" "authrity_bridge"
 
 # Build HMI Frontend
 Write-Host "`n--- Building HMI Frontend ---" -ForegroundColor Yellow
@@ -65,7 +64,6 @@ Write-Host "✅ apc_engine\target\release\authrity-apc-engine.exe" -ForegroundCo
 Write-Host "✅ hmi\target\release\authrity-hmi.exe" -ForegroundColor Green
 Write-Host "✅ virtual_plant\target\release\authrity-virtual-plant.exe" -ForegroundColor Green
 Write-Host "✅ controller_host\target\release\controller_host.exe" -ForegroundColor Green
-Write-Host "✅ authrity_bridge\target\release\authrity-bridge.exe" -ForegroundColor Green
 Write-Host "✅ hmi\frontend\dist\" -ForegroundColor Green
 
 Write-Host "`nNext steps:" -ForegroundColor Cyan

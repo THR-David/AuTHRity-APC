@@ -646,12 +646,13 @@ async fn main() -> Result<()> {
         let mut consecutive_failures: u32 = 0;
         const MAX_FAILURES_BEFORE_MONITOR: u32 = 2;   // Switch to Monitor after 2 failures
         const MAX_FAILURES_BEFORE_IDLE: u32 = 10;     // Critical stop after 10 total failures
+        let mut tick_count: u32 = 0;
+        let mut last_logged_mode: i32 = -1;
 
         // --- INNER LOOP: CONTROL LOGIC ---
         loop {
             let tick_start = tokio::time::Instant::now();
-            println!("--- Tick ---");
-            
+
             // NOTE: Model Hot-Swap Logic Removed (Engine is now process-isolated)
             
             // CHECK FOR SAVE CONFIGURATION TRIGGER
@@ -826,9 +827,15 @@ async fn main() -> Result<()> {
                     // 0 = Idle, 1 = Monitor (Calc but don't write), 2 = Engage
                     let operating_mode = mode_vec.first().cloned().unwrap_or(0.0) as i32;
 
+                    // Log mode changes (not every tick)
+                    if operating_mode != last_logged_mode {
+                        last_logged_mode = operating_mode;
+                        let mode_name = match operating_mode { 0 => "Idle", 1 => "Monitor", 2 => "Engage", _ => "Unknown" };
+                        println!("[{}] Operating mode → {} ({})", engine_id, mode_name, operating_mode);
+                    }
+
                     // If Idle, skip calculation but keep heartbeat alive
                     if operating_mode == 0 {
-                        println!("💤 Idle (Mode 0). Waiting...");
                         let _ = opc_interface::write_single(&session, &node_solver_status, 0.0).await;
                     } else {
                         // === INPUT VALIDATION (Defense in Depth) ===
@@ -919,22 +926,7 @@ async fn main() -> Result<()> {
                         }
                         
                         // === INPUTS VALIDATED - PROCEED WITH CONTROL ===
-                        
-                        // 🔍 DEBUG: Print parameters being used by DMC controller
-                        println!("🔍 DMC PARAMETERS:");
-                        println!("   CVs:");
-                        for (i, cv) in model.variables.cvs.iter().enumerate() {
-                            println!("      {}: Weight={:.2}, Alpha={:.2}, Target={:.2}, Limits=[LL:{:.2}, L:{:.2}, H:{:.2}, HH:{:.2}]", 
-                                cv.name, cv_weights[i], cv_alphas[i], targets[i],
-                                cv_lim_ll[i], cv_lim_l[i], cv_lim_h[i], cv_lim_hh[i]);
-                        }
-                        println!("   MVs:");
-                        for (i, mv) in model.variables.mvs.iter().enumerate() {
-                            println!("      {}: Weight={:.2}, Limits=[LL:{:.2}, L:{:.2}, H:{:.2}, HH:{:.2}]", 
-                                mv.name, mv_weights[i],
-                                lim_ll[i], lim_l[i], lim_h[i], lim_hh[i]);
-                        }
-                        
+
                         // B. SOLVE (Always commit predictions - needed for deadtime tracking)
                         // Bias correction handles discrepancies from unmeasured disturbances (operator moves)
                         let solve_start = tokio::time::Instant::now();
@@ -1012,13 +1004,16 @@ async fn main() -> Result<()> {
                         } else {
                             // SOLVER SUCCEEDED - Reset failure counter
                             if consecutive_failures > 0 {
-                                println!("✅ Solver recovered successfully after {} failure(s).", consecutive_failures);
+                                println!("✅ Solver recovered after {} failure(s).", consecutive_failures);
                                 consecutive_failures = 0;
                             }
-                            
-                            // Print control summary
-                            let mode_str = if operating_mode == 2 { "Engage" } else { "Monitor" };
-                            println!("✅ Solver OK ({}ms) | Mode: {}", exec_ms as i32, mode_str);
+
+                            // Periodic alive confirmation (every 60 ticks)
+                            tick_count += 1;
+                            if tick_count % 60 == 1 {
+                                let mode_str = if operating_mode == 2 { "Engage" } else { "Monitor" };
+                                println!("[Tick {}] {} | Solve: {}ms", tick_count, mode_str, exec_ms as i32);
+                            }
                         }
 
                         let delta_mvs = dmc_result.next_move;
@@ -1085,16 +1080,6 @@ async fn main() -> Result<()> {
                                     }
                                 } else {
                                     // Operator hasn't requested Remote Cascade - skip
-                                    let mode_name = match actual_mode {
-                                        0 => "Operator",
-                                        1 => "Auto",
-                                        2 => "Cascade",
-                                        _ => "Unknown",
-                                    };
-                                    if operating_mode == 2 {
-                                        println!("⏸️  {} in {} mode - MPC not controlling (bias correction handles effects)", 
-                                            model.variables.mvs[i].name, mode_name);
-                                    }
                                 }
                                 continue;
                             }

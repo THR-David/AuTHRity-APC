@@ -1041,6 +1041,40 @@ pub async fn stop_controller_proxy(
     }
 }
 
+#[derive(Deserialize)]
+pub struct LogTailQuery {
+    pub lines: Option<usize>,
+}
+
+pub async fn get_controller_logs_proxy(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<AppState>,
+    user: CurrentUser,
+    Query(query): Query<LogTailQuery>,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::ReadView) {
+        return e.into_response();
+    }
+
+    let target_sup = state.settings.services.supervisor_url.clone();
+    let api_key = state.settings.services.supervisor_api_key.clone();
+
+    let lines = query.lines.unwrap_or(80);
+    let client = Client::new();
+    let url = format!("{}/api/controllers/{}/logs/tail?lines={}", target_sup, id, lines);
+
+    match client.get(&url).header("x-api-key", api_key).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("Supervisor unreachable: {}", e)).into_response(),
+    }
+}
+
 // --- QUERY HISTORICAL DATA FROM QUESTDB ---
 #[derive(Deserialize)]
 pub struct TrendsQuery {
