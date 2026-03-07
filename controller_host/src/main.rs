@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State, Request},
+    extract::{Path, Query, State, Request},
     routing::{get, post},
     Json, Router,
     http::StatusCode,
@@ -8,18 +8,13 @@ use axum::{
 };
 use clap::Parser;
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    path::{Path as StdPath, PathBuf},
-    sync::{Arc, Mutex},
-    process::{Command, Stdio},
-    fs::File,
-};
-use tokio::fs;
+use std::{collections::HashMap, net::SocketAddr, path::{Path as StdPath, PathBuf}, sync::{Arc, Mutex}, fs::File};
+use tokio::{fs, process::Command};
+use tokio::io::AsyncReadExt;
+use std::process::Stdio;
 use tracing::{info, error, warn};
 use serde_json::json;
-use chrono::Local;
+use chrono::{Local, DateTime, Utc};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -84,6 +79,9 @@ struct ProcessStatus {
     active_model: Option<String>,
     state: ProcessState,
     last_error: Option<String>,
+    started_at: Option<DateTime<Utc>>,
+    stopped_at: Option<DateTime<Utc>>,
+    last_log_path: Option<String>,
 }
 
 #[tokio::main]
@@ -168,6 +166,7 @@ async fn main() {
         .route("/api/opc-client/defaults", get(get_opc_client_defaults).post(set_opc_client_defaults))
         .route("/api/controllers/:id/start", post(start_controller))
         .route("/api/controllers/:id/stop", post(stop_controller))
+        .route("/api/controllers/:id/logs/tail", get(get_log_tail))
         .route("/api/controllers/:id/config", get(get_model_config)) // <--- Added: Access to Single Source of Truth for Physics
         .route("/api/controllers/:id/models/:filename", get(get_model_file)) // <--- Added: Fetch specific model file
         .route("/api/deploy", post(deploy_model))
@@ -204,6 +203,52 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
+#[derive(Deserialize)]
+struct LogTailQuery {
+    lines: Option<usize>,
+}
+
+async fn get_log_tail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(query): Query<LogTailQuery>,
+) -> impl IntoResponse {
+    let log_path = {
+        let processes = state.processes.lock().unwrap();
+        processes.get(&id).and_then(|p| p.last_log_path.clone())
+    };
+
+    let Some(path_str) = log_path else {
+        return (StatusCode::NOT_FOUND, Json(serde_json::json!({
+            "id": id,
+            "lines": [],
+            "error": "No log file recorded for this controller"
+        }))).into_response();
+    };
+
+    let n = query.lines.unwrap_or(80).min(500);
+
+    match tokio::fs::read_to_string(&path_str).await {
+        Ok(contents) => {
+            let lines: Vec<&str> = contents.lines().collect();
+            let tail: Vec<&str> = lines.iter().rev().take(n).rev().cloned().collect();
+            Json(serde_json::json!({
+                "id": id,
+                "log_path": path_str,
+                "lines": tail,
+            })).into_response()
+        }
+        Err(e) => {
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "id": id,
+                "log_path": path_str,
+                "lines": [],
+                "error": format!("Failed to read log: {}", e)
+            }))).into_response()
+        }
+    }
+}
+
 // DTOs
 #[derive(Serialize)]
 struct ControllerSummary {
@@ -211,6 +256,10 @@ struct ControllerSummary {
     models: Vec<String>,
     active_model: Option<String>,
     state: ProcessState,
+    last_error: Option<String>,
+    started_at: Option<DateTime<Utc>>,
+    stopped_at: Option<DateTime<Utc>>,
+    last_log_path: Option<String>,
 }
 
 /// List all available model folders and their running state
@@ -241,17 +290,23 @@ async fn list_controllers(State(state): State<AppState>) -> Json<Vec<ControllerS
 
                     // Get process status
                     let processes = state.processes.lock().unwrap();
-                    let (current_state, active_model) = if let Some(p) = processes.get(&id) {
-                        (p.state.clone(), p.active_model.clone())
-                    } else {
-                        (ProcessState::Stopped, None)
-                    };
+                    let (current_state, active_model, last_error, started_at, stopped_at, last_log_path) =
+                        if let Some(p) = processes.get(&id) {
+                            (p.state.clone(), p.active_model.clone(), p.last_error.clone(),
+                             p.started_at, p.stopped_at, p.last_log_path.clone())
+                        } else {
+                            (ProcessState::Stopped, None, None, None, None, None)
+                        };
 
                     summaries.push(ControllerSummary {
                         id,
                         models,
                         active_model,
                         state: current_state,
+                        last_error,
+                        started_at,
+                        stopped_at,
+                        last_log_path,
                     });
                 }
             }
@@ -536,15 +591,57 @@ async fn start_controller(
                 }
             }
 
-            let pid = child.id();
+            // tokio::process::Child::id() returns Option<u32>; unwrap_or(0) is safe here
+            // since a successfully spawned process will always have a PID at this point
+            let pid = child.id().unwrap_or(0);
             info!("Started controller {} with PID {}", id, pid);
-            let mut processes = state.processes.lock().unwrap();
-            processes.insert(id.clone(), ProcessStatus {
-                id,
-                active_model: Some(payload.model_filename),
-                state: ProcessState::Running(pid),
-                last_error: None,
+            let log_path_str = log_path.to_string_lossy().to_string();
+            {
+                let mut processes = state.processes.lock().unwrap();
+                processes.insert(id.clone(), ProcessStatus {
+                    id: id.clone(),
+                    active_model: Some(payload.model_filename.clone()),
+                    state: ProcessState::Running(pid),
+                    last_error: None,
+                    started_at: Some(Utc::now()),
+                    stopped_at: None,
+                    last_log_path: Some(log_path_str),
+                });
+            }
+
+            // Background task: watch for child exit and update state
+            let processes_watcher = state.processes.clone();
+            let watch_id = id.clone();
+            tokio::spawn(async move {
+                let exit_status = child.wait().await;
+                let mut processes = processes_watcher.lock().unwrap();
+                if let Some(status) = processes.get_mut(&watch_id) {
+                    // Only update if we're still the running instance (same PID)
+                    if matches!(status.state, ProcessState::Running(p) if p == pid) {
+                        status.stopped_at = Some(Utc::now());
+                        match exit_status {
+                            Ok(s) if s.success() => {
+                                info!("Controller {} exited cleanly.", watch_id);
+                                status.state = ProcessState::Stopped;
+                                status.last_error = None;
+                            }
+                            Ok(s) => {
+                                let msg = format!("Exited with code: {}", s.code().unwrap_or(-1));
+                                warn!("Controller {} failed: {}", watch_id, msg);
+                                status.state = ProcessState::Failed;
+                                status.last_error = Some(msg);
+                            }
+                            Err(e) => {
+                                let msg = format!("Wait error: {}", e);
+                                error!("Controller {} wait error: {}", watch_id, e);
+                                status.state = ProcessState::Failed;
+                                status.last_error = Some(msg);
+                            }
+                        }
+                    }
+                }
             });
+
             (StatusCode::OK, Json(json!({"pid": pid}))).into_response()
         }
         Err(e) => {
@@ -648,12 +745,10 @@ async fn stop_controller(
             #[cfg(not(target_os = "windows"))]
             let _ = Command::new("kill").arg(pid.to_string()).output();
             
-            processes.insert(id.clone(), ProcessStatus {
-                id,
-                active_model: None,
-                state: ProcessState::Stopped,
-                last_error: None,
-            });
+            if let Some(status) = processes.get_mut(&id) {
+                status.state = ProcessState::Stopped;
+                status.stopped_at = Some(Utc::now());
+            }
             return (StatusCode::OK, "Stopped").into_response();
         }
     }

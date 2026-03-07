@@ -12,6 +12,7 @@ import { ManageTab } from './components/ManageTab';
 import { ModelsTab } from './components/ModelsTab';
 import { PlantOverview } from './components/PlantOverview';
 import { SettingsView } from './components/SettingsView';
+import { ControllerDiagnostics } from './components/ControllerDiagnostics';
 import { useTagStore } from './store/tagStore';
 import { apiChangePassword, apiLogin, apiLogout, apiMe, hasRoleAtLeast, type UserRole } from './lib/api';
 
@@ -72,6 +73,7 @@ function App() {
 
   const [dataStale, setDataStale] = useState(false);
     const [controllerRunning, setControllerRunning] = useState<boolean | null>(null);
+    const [controllerSummary, setControllerSummary] = useState<any | null>(null);
 
   const ws = useRef<WebSocket | null>(null);
 
@@ -286,6 +288,7 @@ function App() {
         const isControllerView = activeModel !== "Generator" && activeModel !== "Plant Overview" && activeModel !== "Settings";
         if (!isControllerView) {
             setControllerRunning(null);
+            setControllerSummary(null);
             return;
         }
 
@@ -315,10 +318,12 @@ function App() {
 
                 if (!target) {
                     setControllerRunning(false);
+                    setControllerSummary(null);
                     return;
                 }
 
                 setControllerRunning(parseIsRunning(target.state));
+                setControllerSummary(target);
             } catch {
             }
         };
@@ -698,9 +703,11 @@ function App() {
                         </div>
                     )}
                     {activeTab === "Details" && (
-                        <div className="h-full flex flex-col items-center justify-center text-slate-600 border-2 border-dashed border-slate-800 rounded-lg animate-in fade-in duration-300">
-                            <span className="text-4xl mb-4">📊</span>
-                            <h3 className="text-xl font-bold mb-2">Detailed Diagnostics</h3>
+                        <div className="h-full flex flex-col">
+                            <ControllerDiagnostics
+                                controllerId={systemPrefix || activeModel}
+                                summary={controllerSummary}
+                            />
                         </div>
                     )}
                     <div className="text-center text-xs text-slate-600 mt-8 mb-4">

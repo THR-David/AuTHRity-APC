@@ -117,6 +117,7 @@ async fn main() -> Result<()> {
         .route("/api/prox/controllers", get(web_routes::list_controllers_proxy))
         .route("/api/prox/controllers/:id/start", post(web_routes::start_controller_proxy))
         .route("/api/prox/controllers/:id/stop", post(web_routes::stop_controller_proxy))
+        .route("/api/prox/controllers/:id/logs/tail", get(web_routes::get_controller_logs_proxy))
         .nest_service("/", ServeDir::new(assets_dir))
         .with_state(app_state)
         .layer(session_layer);

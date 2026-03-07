@@ -37,7 +37,6 @@ build_rust "DMC Engine" "apc_engine"
 build_rust "HMI Backend" "hmi"
 build_rust "Virtual Plant" "virtual_plant"
 build_rust "Controller Host" "controller_host"
-build_rust "AuTHRity Bridge" "authrity_bridge"
 
 # Build HMI Frontend
 echo -e "${YELLOW}\n--- Building HMI Frontend ---${NC}"
@@ -61,9 +60,8 @@ echo -e "${GREEN}✅ apc_engine/target/release/authrity-apc-engine${NC}"
 echo -e "${GREEN}✅ hmi/target/release/authrity-hmi${NC}"
 echo -e "${GREEN}✅ virtual_plant/target/release/authrity-virtual-plant${NC}"
 echo -e "${GREEN}✅ controller_host/target/release/controller_host${NC}"
-echo -e "${GREEN}✅ authrity_bridge/target/release/authrity-bridge${NC}"
 echo -e "${GREEN}✅ hmi/frontend/dist/${NC}"
 
 echo -e "${CYAN}\nNext steps:${NC}"
-echo "1. Run ./copy_portable.ps1 to package everything"
+echo "1. Run ./copy_portable.sh to package everything"
 echo "2. Run portable/start_all.sh to launch"
