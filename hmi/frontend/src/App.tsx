@@ -37,6 +37,8 @@ type ModelConfig = {
 };
 
 function App() {
+    const CONTROLLER_FRESHNESS_WINDOW_MS = 20000;
+
     const [authReady, setAuthReady] = useState(false);
     const [authenticated, setAuthenticated] = useState(false);
     const [username, setUsername] = useState('');
@@ -77,6 +79,43 @@ function App() {
 
   const ws = useRef<WebSocket | null>(null);
 
+    const getControllerLiveness = () => {
+        if (!systemPrefix) {
+            return { isFresh: false, nodeId: '', ageMs: Number.POSITIVE_INFINITY };
+        }
+
+        const tags = useTagStore.getState().tags;
+        const candidateNodes = [
+            `${systemPrefix}:Heartbeat`,
+            `${systemPrefix}:NextRun`,
+            `${systemPrefix}:SolverStatus`,
+            `${systemPrefix}:OperatingMode`,
+        ];
+
+        let bestAgeMs = Number.POSITIVE_INFINITY;
+        let freshestNode = '';
+
+        candidateNodes.forEach(nodeId => {
+            const timestamp = tags[nodeId]?.timestamp;
+            if (!timestamp) return;
+
+            const tsMs = new Date(timestamp).getTime();
+            if (!Number.isFinite(tsMs)) return;
+
+            const ageMs = Date.now() - tsMs;
+            if (ageMs < bestAgeMs) {
+                bestAgeMs = ageMs;
+                freshestNode = nodeId;
+            }
+        });
+
+        return {
+            isFresh: bestAgeMs <= CONTROLLER_FRESHNESS_WINDOW_MS,
+            nodeId: freshestNode,
+            ageMs: bestAgeMs,
+        };
+    };
+
     useEffect(() => {
         const bootstrapAuth = async () => {
             try {
@@ -93,6 +132,56 @@ function App() {
         };
         bootstrapAuth();
     }, []);
+
+    // Keep auth session alive while HMI is open.
+    useEffect(() => {
+        if (!authenticated) return;
+
+        let cancelled = false;
+
+        const keepAlive = async () => {
+            try {
+                const me = await apiMe();
+                if (cancelled) return;
+
+                if (!me.authenticated) {
+                    setAuthenticated(false);
+                    setUsername('');
+                    setRole('viewer');
+                    setForcePasswordChange(false);
+                    setAuthError('Session expired. Please log in again.');
+                    return;
+                }
+
+                if (me.username && me.role) {
+                    setUsername(me.username);
+                    setRole(me.role);
+                    setForcePasswordChange(me.force_password_change);
+                }
+            } catch {
+                // Ignore transient network errors; next keepalive will retry.
+            }
+        };
+
+        const interval = setInterval(() => {
+            void keepAlive();
+        }, 5 * 60 * 1000);
+
+        const onVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                void keepAlive();
+            }
+        };
+
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        void keepAlive();
+
+        return () => {
+            cancelled = true;
+            clearInterval(interval);
+            document.removeEventListener('visibilitychange', onVisibilityChange);
+        };
+    }, [authenticated]);
 
   // 1. CONFIG LOAD (YAML Structure Inference)
   useEffect(() => {
@@ -255,27 +344,14 @@ function App() {
     }
   }, [systemPrefix]); // Only run when systemPrefix changes (model switch)
 
-  // 4. HEARTBEAT CHECK
+  // 4. CONTROLLER LIVENESS CHECK
   useEffect(() => {
     if (!systemPrefix) return;
     
-    // Check heartbeat every 5 seconds
+    // Check controller signal freshness every 5 seconds.
     const interval = setInterval(() => {
-        const heartbeatNode = `${systemPrefix}:Heartbeat`;
-        const tag = useTagStore.getState().tags[heartbeatNode];
-        
-        if (tag) {
-            const lastTime = new Date(tag.timestamp).getTime();
-            const now = Date.now();
-            // If data is older than 10 seconds (allow 2 missed cycles), consider it stale
-            if (now - lastTime > 10000) {
-                setDataStale(true);
-            } else {
-                setDataStale(false);
-            }
-        } else {
-            setDataStale(true);
-        }
+        const liveness = getControllerLiveness();
+        setDataStale(!liveness.isFresh);
     }, 5000);
 
     return () => clearInterval(interval);
@@ -360,12 +436,8 @@ function App() {
             if (controllerRunning === false) return "bg-red-500";
             if (controllerRunning === null) return "bg-amber-500 animate-pulse";
 
-            const heartbeatNode = `${systemPrefix}:Heartbeat`;
-            const tag = useTagStore.getState().tags[heartbeatNode];
-            if (!tag) return "bg-amber-500 animate-pulse";
-
-            const ageMs = Date.now() - new Date(tag.timestamp).getTime();
-            if (ageMs > 10000 || dataStale) return "bg-amber-500 animate-pulse";
+            const liveness = getControllerLiveness();
+            if (!liveness.isFresh || dataStale) return "bg-amber-500 animate-pulse";
             return "bg-emerald-500";
         }
 
@@ -382,12 +454,9 @@ function App() {
           if (controllerRunning === false) return "System Offline";
           if (controllerRunning === null) return "Checking controller...";
 
-                    const heartbeatNode = `${systemPrefix}:Heartbeat`;
-                    const tag = useTagStore.getState().tags[heartbeatNode];
-          if (!tag) return "Data Stale (Heartbeat Lost)";
-
-                    const ageMs = Date.now() - new Date(tag.timestamp).getTime();
-                    if (ageMs > 10000 || dataStale) return "Data Stale (Heartbeat Lost)";
+                                        const liveness = getControllerLiveness();
+                                        if (!liveness.nodeId) return "Data Stale (No Live Controller Signals)";
+                                        if (!liveness.isFresh || dataStale) return "Data Stale (Controller Updates Delayed)";
                     return "System Online";
             }
 
@@ -672,6 +741,7 @@ function App() {
                                 cvList={cvList}
                                 mvList={mvList}
                                 dvList={dvList}
+                                descriptions={descriptions}
                             />
                         </div>
                     )}

@@ -24,6 +24,7 @@ export const ValueEditorModal: React.FC<ValueEditorModalProps> = ({
 }) => {
   const [inputValue, setInputValue] = useState<string>("");
   const initialValueRef = useRef<number | string>(currentValue);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   // CRUCIAL FIX: Only sync input on initial open, NOT on background updates
   useEffect(() => {
@@ -31,6 +32,12 @@ export const ValueEditorModal: React.FC<ValueEditorModalProps> = ({
       const value = typeof currentValue === 'number' ? currentValue.toFixed(2) : String(currentValue);
       setInputValue(value);
       initialValueRef.current = currentValue;
+
+      // Focus and select text so typing replaces the current value immediately.
+      setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 0);
     }
   }, [isOpen]); // Removed currentValue from deps - only runs on open/close
 
@@ -74,6 +81,7 @@ export const ValueEditorModal: React.FC<ValueEditorModalProps> = ({
           
           <div className="flex items-center gap-2 mb-4">
             <input
+              ref={inputRef}
               type="text"
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}

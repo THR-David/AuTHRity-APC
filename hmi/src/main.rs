@@ -77,10 +77,11 @@ async fn main() -> Result<()> {
     };
 
     let session_store = MemoryStore::default();
+    let inactivity_minutes = settings.hmi_auth.session_inactivity_minutes.max(5) as i64;
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(true)
         .with_same_site(SameSite::Strict)
-        .with_expiry(Expiry::OnInactivity(Duration::minutes(15)));
+        .with_expiry(Expiry::OnInactivity(Duration::minutes(inactivity_minutes)));
 
     // 5. Frontend Location
     let assets_dir = PathBuf::from("frontend/dist");

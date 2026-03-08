@@ -1081,6 +1081,8 @@ pub struct TrendsQuery {
     tags: String,        // Comma-separated: "TI1:PV,FC1:OP"
     start: String,       // ISO timestamp or relative: "2024-01-10T14:00:00Z" or "-1h"
     end: Option<String>, // ISO timestamp or "now"
+    bucket_ms: Option<u64>,
+    max_points: Option<usize>,
 }
 
 #[derive(Serialize)]
@@ -1100,7 +1102,7 @@ pub async fn get_trends_data(
         return e.into_response();
     }
 
-    use crate::historian::query_historical_data;
+    use crate::historian::{query_historical_data, HistoricalQueryOptions};
 
     // Parse end time - use provided end or default to now
     let end_time = if let Some(end_str) = &params.end {
@@ -1160,8 +1162,21 @@ pub async fn get_trends_data(
         ).into_response();
     }
 
+    let range_ms = (end_time - start_time).num_milliseconds().max(1) as u64;
+    let derived_bucket_ms = params.max_points
+        .filter(|points| *points > 0)
+        .map(|points| {
+            let points_u64 = points as u64;
+            let raw = (range_ms + points_u64 - 1) / points_u64;
+            raw.max(1000)
+        });
+
+    let options = HistoricalQueryOptions {
+        bucket_ms: params.bucket_ms.or(derived_bucket_ms),
+    };
+
     // Query historian using shared function
-    match query_historical_data(&state.historian_config, start_time, end_time, node_ids).await {
+    match query_historical_data(&state.historian_config, start_time, end_time, node_ids, options).await {
         Ok(node_histories) => {
             // Flatten grouped data into TrendsDataPoint format
             let mut data_points = Vec::new();
@@ -1236,7 +1251,7 @@ pub async fn get_step_response_data(
     }
 
     use chrono::DateTime;
-    use crate::historian::query_historical_data;
+    use crate::historian::{query_historical_data, HistoricalQueryOptions};
 
     // Parse timestamps
     let start_time = match DateTime::parse_from_rfc3339(&params.start) {
@@ -1274,7 +1289,13 @@ pub async fn get_step_response_data(
     }
 
     // Query historian
-    match query_historical_data(&state.historian_config, start_time, end_time, node_ids).await {
+    match query_historical_data(
+        &state.historian_config,
+        start_time,
+        end_time,
+        node_ids,
+        HistoricalQueryOptions::default(),
+    ).await {
         Ok(data) => Json(data).into_response(),
         Err(e) => (
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,

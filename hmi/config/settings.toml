@@ -41,5 +41,28 @@ batch_size = 100
 flush_interval_ms = 1000
 snapshot_interval_sec = 60  # Log all nodes every 60 seconds (even if unchanged)
 
+[historian.deadband]
+enabled = true
+absolute_default = 0.005
+relative_percent_default = 0.1
+max_silence_sec = 300
+
+[historian.deadband.field_overrides.Mode]
+absolute = 1.0
+relative_percent = 0.0
+
+[historian.deadband.field_overrides.ModeTarget]
+absolute = 1.0
+relative_percent = 0.0
+
+[historian.deadband.field_overrides.LowLimit]
+absolute = 0.01
+relative_percent = 0.0
+
+[historian.deadband.field_overrides.HighLimit]
+absolute = 0.01
+relative_percent = 0.0
+
 [hmi_auth]
 database_url = "sqlite:config/hmi.db"
+session_inactivity_minutes = 60

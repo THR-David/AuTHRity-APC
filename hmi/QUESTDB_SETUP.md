@@ -19,6 +19,16 @@ table_name = "process_data"
 batch_size = 100            # Flush after N records
 flush_interval_ms = 1000    # Or flush every X ms
 snapshot_interval_sec = 60  # Periodic full-tag snapshot (ReadAll)
+
+[historian.deadband]
+enabled = true
+absolute_default = 0.005        # Minimum absolute change to log
+relative_percent_default = 0.1  # Relative deadband (% of current magnitude)
+max_silence_sec = 300           # Force write at least every N seconds
+
+[historian.deadband.field_overrides.Mode]
+absolute = 1.0
+relative_percent = 0.0
 ```
 
 ## Data Schema (what the historian writes)
