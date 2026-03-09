@@ -196,6 +196,36 @@
         }
       },
       {
+        "name": "DisturbanceEnable",
+        "description": "Disturbance command as binary CV (1=on, 0=off)",
+        "units": "",
+        "weight": 0.0,
+        "alpha": 0.0,
+        "ece_factor": 1,
+        "optimization_mode": {
+          "type": "Target",
+          "value": 0
+        },
+        "limits": {
+          "low_low": 0,
+          "low": 0,
+          "target": 0,
+          "high": 1,
+          "high_high": 1
+        },
+        "node_ids": {
+          "pv": "DisturbanceEnable:PV",
+          "target": "DisturbanceEnable:Target",
+          "prediction": "DisturbanceEnable:Prediction",
+          "limits": {
+            "high": "DisturbanceEnable:HighLimit",
+            "low": "DisturbanceEnable:LowLimit",
+            "hh": "DisturbanceEnable:HighHighLimit",
+            "ll": "DisturbanceEnable:LowLowLimit"
+          }
+        }
+      },
+      {
         "name": "Sum_Bias",
         "description": "Bias sum",
         "units": "",

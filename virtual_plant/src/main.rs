@@ -48,8 +48,16 @@ const NODE_FLOW_MASTER_OP: &str = "FlowMaster:OP";
 const NODE_FLOW_MASTER_SP: &str = "FlowMaster:SP";
 const NODE_FLOW_MASTER_PV: &str = "FlowMaster:PV";
 const NODE_COKE_ENABLE: &str = "PassBalancing:CokeEnable";
+const NODE_DISTURBANCE_ENABLE: &str = "PassBalancing:DisturbanceEnable";
+const NODE_DISTURBANCE_CV_PV: &str = "DisturbanceEnable:PV";
+const NODE_DISTURBANCE_CV_TARGET: &str = "DisturbanceEnable:Target";
 const NODE_SUM_BIAS: &str = "PassBalancing:Sum_Bias";
 const NODE_SUM_BIAS_CV_PV: &str = "Sum_Bias:PV";
+
+// Cyclic disturbance profile: offsets define amplitude (+/-), ramps define speed.
+// Tuned slow enough so MPC can meaningfully counteract during tests.
+const DISTURBANCE_TEST_OFFSETS: [f64; 6] = [1.8, 1.2, 0.8, 0.8, 1.2, 1.8];
+const DISTURBANCE_TEST_RAMPS_PER_MIN: [f64; 6] = [0.04, 0.03, 0.025, 0.025, 0.03, 0.04];
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -131,6 +139,9 @@ async fn main() -> Result<()> {
     let node_flow_master_sp = NodeId::new(namespace, NODE_FLOW_MASTER_SP);
     let write_flow_master_pv = NodeId::new(namespace, NODE_FLOW_MASTER_PV);
     let node_coke_enable = NodeId::new(namespace, NODE_COKE_ENABLE);
+    let node_disturbance_enable = NodeId::new(namespace, NODE_DISTURBANCE_ENABLE);
+    let write_disturbance_cv_pv = NodeId::new(namespace, NODE_DISTURBANCE_CV_PV);
+    let node_disturbance_cv_target = NodeId::new(namespace, NODE_DISTURBANCE_CV_TARGET);
     let write_sum_bias = NodeId::new(namespace, NODE_SUM_BIAS);
     let write_sum_bias_cv_pv = NodeId::new(namespace, NODE_SUM_BIAS_CV_PV);
 
@@ -312,15 +323,24 @@ async fn main() -> Result<()> {
         let _ = opc_interface::write_single(&session, &node_flow_master_sp, 300.0).await;
         let _ = opc_interface::write_single(&session, &write_flow_master_pv, 300.0).await;
         let _ = opc_interface::write_single(&session, &node_coke_enable, 0.0).await;
+        let _ = opc_interface::write_single(&session, &node_disturbance_enable, 0.0).await;
+        let _ = opc_interface::write_single(&session, &write_disturbance_cv_pv, 0.0).await;
+        let _ = opc_interface::write_single(&session, &node_disturbance_cv_target, 0.0).await;
         let _ = opc_interface::write_single(&session, &write_sum_bias, 0.0).await;
         let _ = opc_interface::write_single(&session, &write_sum_bias_cv_pv, 0.0).await;
         for i in 0..6 {
             let _ = opc_interface::write_single(&session, &fc_bias_sp_nodes[i], 0.0).await;
             let _ = opc_interface::write_single(&session, &fc_bias_pv_nodes[i], 0.0).await;
             let _ = opc_interface::write_single(&session, &fc_bias_op_nodes[i], 0.0).await;
-            let _ = opc_interface::write_single(&session, &coke_offset_nodes[i], 0.0).await;
-            let _ = opc_interface::write_single(&session, &coke_ramp_nodes[i], 0.0).await;
+            let _ = opc_interface::write_single(&session, &coke_offset_nodes[i], DISTURBANCE_TEST_OFFSETS[i]).await;
+            let _ = opc_interface::write_single(&session, &coke_ramp_nodes[i], DISTURBANCE_TEST_RAMPS_PER_MIN[i]).await;
         }
+
+        println!(
+            "PassBalancing disturbance profile loaded: offsets={:?}, ramps/min={:?}",
+            DISTURBANCE_TEST_OFFSETS,
+            DISTURBANCE_TEST_RAMPS_PER_MIN
+        );
         
         println!("Initial values set: Reflux={}m³/h, Steam={}m³/h, Feed={}m³/h, Mode={}", 
                  init_reflux, init_steam, init_feed, init_mode as i32);
@@ -374,6 +394,14 @@ async fn main() -> Result<()> {
                         .unwrap_or(0.0)
                         >= 0.5;
 
+                    let disturbance_target = opc_interface::read_bulk(&session, &[node_disturbance_cv_target.clone()])
+                        .await
+                        .ok()
+                        .and_then(|v| v.first().copied())
+                        .unwrap_or(1.0)
+                        .clamp(0.0, 1.0);
+                    let disturbance_enable = disturbance_target >= 0.5;
+
                     let mut coke_offset = [0.0; 6];
                     if let Ok(vals) = opc_interface::read_bulk(&session, &coke_offset_nodes).await {
                         for i in 0..6 {
@@ -391,7 +419,9 @@ async fn main() -> Result<()> {
                     let pass_inputs = PassBalancingInputs {
                         flow_master_op,
                         bias_sp,
-                        coke_enable,
+                        // DisturbanceEnable target is the primary runtime command.
+                        // Keep CokeEnable as legacy compatibility fallback.
+                        coke_enable: disturbance_enable || coke_enable,
                         coke_offset,
                         coke_ramp_per_min,
                     };
@@ -421,6 +451,8 @@ async fn main() -> Result<()> {
                     let _ = opc_interface::write_single(&session, &write_cstr_cool_op, cool_temp).await;
 
                     let _ = opc_interface::write_single(&session, &write_flow_master_pv, pass_out.total_flow).await;
+                    let _ = opc_interface::write_single(&session, &node_disturbance_enable, if disturbance_enable { 1.0 } else { 0.0 }).await;
+                    let _ = opc_interface::write_single(&session, &write_disturbance_cv_pv, if disturbance_enable { 1.0 } else { 0.0 }).await;
                     let _ = opc_interface::write_single(&session, &write_sum_bias, pass_out.sum_bias).await;
                     let _ = opc_interface::write_single(&session, &write_sum_bias_cv_pv, pass_out.sum_bias).await;
                     for i in 0..6 {

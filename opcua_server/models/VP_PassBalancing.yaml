@@ -56,11 +56,60 @@ nodes:
   - nodeId: "PassBalancing:DisturbanceEnable"
     nodeClass: "Variable"
     dataType: "Boolean"
-    initialValue: true
+    initialValue: false
   - nodeId: "PassBalancing:Sum_Bias"
     nodeClass: "Variable"
     dataType: "Double"
     initialValue: 0.0
+
+  # CV: DisturbanceEnable (binary-style CV to toggle coke disturbance behavior)
+  - nodeId: "DisturbanceEnable"
+    nodeClass: "Object"
+    description: "Disturbance enable command as CV target (1=on, 0=off)"
+  - nodeId: "DisturbanceEnable:PV"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:Target"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:LowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:HighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "DisturbanceEnable:LowLowLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:HighHighLimit"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 1.0
+  - nodeId: "DisturbanceEnable:Weight"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:Alpha"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:Bias"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:SteadyState"
+    nodeClass: "Variable"
+    dataType: "Double"
+    initialValue: 0.0
+  - nodeId: "DisturbanceEnable:Prediction"
+    nodeClass: "Variable"
+    dataType: "DoubleArray"
+    initialValue: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]
 
   # CV: Sum_Bias
   - nodeId: "Sum_Bias"

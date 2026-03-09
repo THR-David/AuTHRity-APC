@@ -32,6 +32,8 @@ pub struct PassBalancingModel {
     states: [[f64; 6]; 6],
     base_temperatures: [f64; 6],
     coke_dynamic_offsets: [f64; 6],
+    coke_cycle_direction: [f64; 6],
+    prev_coke_enable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -72,6 +74,8 @@ impl PassBalancingModel {
             states: [[0.0; 6]; 6],
             base_temperatures: [103.0, 102.0, 101.0, 99.0, 98.0, 97.0],
             coke_dynamic_offsets: [0.0; 6],
+            coke_cycle_direction: [1.0; 6],
+            prev_coke_enable: false,
         }
     }
 
@@ -106,18 +110,44 @@ impl PassBalancingModel {
         }
 
         if input.coke_enable {
+            // Bumpless activation: begin from zero disturbance and ramp from there.
+            if !self.prev_coke_enable {
+                self.coke_dynamic_offsets = [0.0; 6];
+                self.coke_cycle_direction = [1.0; 6];
+            }
+
             for i in 0..6 {
-                self.coke_dynamic_offsets[i] += input.coke_ramp_per_min[i] * (self.dt_seconds / 60.0);
+                let amplitude = input.coke_offset[i].abs();
+                if amplitude <= 0.0 {
+                    self.coke_dynamic_offsets[i] = 0.0;
+                    continue;
+                }
+
+                let step = input.coke_ramp_per_min[i].abs() * (self.dt_seconds / 60.0);
+                if step <= 0.0 {
+                    continue;
+                }
+
+                self.coke_dynamic_offsets[i] += self.coke_cycle_direction[i] * step;
+                if self.coke_dynamic_offsets[i] >= amplitude {
+                    self.coke_dynamic_offsets[i] = amplitude;
+                    self.coke_cycle_direction[i] = -1.0;
+                } else if self.coke_dynamic_offsets[i] <= -amplitude {
+                    self.coke_dynamic_offsets[i] = -amplitude;
+                    self.coke_cycle_direction[i] = 1.0;
+                }
             }
         } else {
             self.coke_dynamic_offsets = [0.0; 6];
+            self.coke_cycle_direction = [1.0; 6];
         }
+        self.prev_coke_enable = input.coke_enable;
 
         let mut temperatures = [0.0; 6];
         for i in 0..6 {
             let dynamic_sum: f64 = self.states[i].iter().sum();
             let coke = if input.coke_enable {
-                input.coke_offset[i] + self.coke_dynamic_offsets[i]
+                self.coke_dynamic_offsets[i]
             } else {
                 0.0
             };
