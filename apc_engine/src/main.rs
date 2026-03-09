@@ -177,7 +177,8 @@ async fn save_configuration(
             "control_horizon": updated_model.tuning.control_horizon,
             "sample_time": updated_model.tuning.sample_time,
             "solver_tolerance": updated_model.tuning.solver_tolerance,
-            "max_iterations": updated_model.tuning.max_iterations
+            "max_iterations": updated_model.tuning.max_iterations,
+            "terminal_weight_factor": updated_model.tuning.terminal_weight_factor
         },
         "variables": {
             "cvs": updated_model.variables.cvs.iter().map(|cv| json!({
@@ -186,6 +187,9 @@ async fn save_configuration(
                 "units": cv.units,
                 "weight": cv.weight,
                 "alpha": cv.alpha,
+                "ece_factor": cv.ece_factor,
+                "slack_weight": cv.slack_weight,
+                "is_integrating": cv.is_integrating,
                 "optimization_mode": match &cv.optimization_mode {
                     config::OptimizationMode::Target { value } => json!({ "type": "Target", "value": value }),
                     config::OptimizationMode::Zone => json!({ "type": "Zone" }),
@@ -200,14 +204,14 @@ async fn save_configuration(
                     "high_high": cv.limits.high_high
                 },
                 "node_ids": {
-                    "pv": format!("{}:PV", cv.name),
-                    "target": format!("{}:Target", cv.name),
-                    "prediction": format!("{}:Prediction", cv.name),
+                    "pv": cv.node_ids.pv,
+                    "target": cv.node_ids.target,
+                    "prediction": cv.node_ids.prediction,
                     "limits": {
-                        "high": format!("{}:HighLimit", cv.name),
-                        "low": format!("{}:LowLimit", cv.name),
-                        "hh": format!("{}:HighHighLimit", cv.name),
-                        "ll": format!("{}:LowLowLimit", cv.name)
+                        "high": cv.node_ids.limits.high,
+                        "low": cv.node_ids.limits.low,
+                        "hh": cv.node_ids.limits.hh,
+                        "ll": cv.node_ids.limits.ll
                     }
                 }
             })).collect::<Vec<_>>(),
@@ -218,6 +222,7 @@ async fn save_configuration(
                     "units": mv.units,
                     "weight_r": mv.weight_r,
                     "max_move": mv.max_move,
+                    "target_weight": mv.target_weight,
                     "optimization_mode": match &mv.optimization_mode {
                         config::MvOptimizationMode::Target { value } => json!({ "type": "Target", "value": value }),
                         config::MvOptimizationMode::Maximize => json!({ "type": "Maximize" }),
@@ -230,27 +235,26 @@ async fn save_configuration(
                         "high_high": mv.limits.high_high
                     },
                     "node_ids": {
-                        "pv": format!("{}:PV", mv.name),
-                        "sp": format!("{}:SP", mv.name),
-                        "op": format!("{}:OP", mv.name),
-                        "mode": format!("{}:Mode", mv.name),
-                        "mode_target": format!("{}:ModeTarget", mv.name),
-                        "future_plan": format!("{}:FuturePlan", mv.name),
+                        "pv": mv.node_ids.pv,
+                        "sp": mv.node_ids.sp,
+                        "op": mv.node_ids.op,
+                        "mode": mv.node_ids.mode,
+                        "mode_target": mv.node_ids.mode_target,
+                        "future_plan": mv.node_ids.future_plan,
                         "limits": {
-                            "high": format!("{}:HighLimit", mv.name),
-                            "low": format!("{}:LowLimit", mv.name),
-                            "hh": format!("{}:HighHighLimit", mv.name),
-                            "ll": format!("{}:LowLowLimit", mv.name)
+                            "high": mv.node_ids.limits.high,
+                            "low": mv.node_ids.limits.low,
+                            "hh": mv.node_ids.limits.hh,
+                            "ll": mv.node_ids.limits.ll
                         }
                     }
                 });
                 // Add optional economic target
                 if let Some(target) = mv.target {
                     mv_json["target"] = json!(target);
-                    if mv.target_weight > 0.0 {
-                        mv_json["target_weight"] = json!(mv.target_weight);
-                    }
-                    mv_json["node_ids"]["target"] = json!(format!("{}:Target", mv.name));
+                }
+                if let Some(target_node) = &mv.node_ids.target {
+                    mv_json["node_ids"]["target"] = json!(target_node);
                 }
                 mv_json
             }).collect::<Vec<_>>(),
@@ -263,7 +267,11 @@ async fn save_configuration(
                     "high": dv.limits.high
                 },
                 "node_ids": {
-                    "pv": format!("{}:PV", dv.name)
+                    "pv": dv.node_ids.pv,
+                    "limits": {
+                        "high": dv.node_ids.limits.high,
+                        "low": dv.node_ids.limits.low
+                    }
                 }
             })).collect::<Vec<_>>()
         },
