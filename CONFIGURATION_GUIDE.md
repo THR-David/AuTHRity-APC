@@ -4,7 +4,7 @@ This guide lists the runtime configuration surfaces used by the codebase.
 
 ## OPC UA Server
 
-- [opcua_server/config/server.conf](opcua_server/config/server.conf)
+- [opcua_server/config/serversettings.env](opcua_server/config/serversettings.env)
   - `application_name`, `application_uri`
   - `tcp_config.host`, `tcp_config.port`
   - `pki_dir`, `certificate_path`, `private_key_path`
@@ -39,4 +39,4 @@ This guide lists the runtime configuration surfaces used by the codebase.
 
 ## Portable Configuration
 
-If you build a portable bundle with `copy_portable.ps1`, run `portable/CONFIGURE.ps1` to update IPs/hosts in the packaged configs.
+If you build a portable bundle with `Build_scripts/windows/copy_portable.ps1`, run `portable-windows/CONFIGURE.ps1` to update IPs/hosts in the packaged configs.

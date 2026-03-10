@@ -109,13 +109,13 @@ See [SYSTEM_OVERVIEW.md](SYSTEM_OVERVIEW.md) for data flow details.
 
 Update IP/host in:
 
-- [opcua_server/server.conf](opcua_server/server.conf)
+- [opcua_server/config/serversettings.env](opcua_server/config/serversettings.env)
 - [hmi/config/settings.toml](hmi/config/settings.toml)
 - [virtual_plant/config/settings.toml](virtual_plant/config/settings.toml)
 
 Details in [CONFIGURATION_GUIDE.md](CONFIGURATION_GUIDE.md).
 
-If you build a portable bundle with `copy_portable.ps1`, run `portable/CONFIGURE.ps1` to update IPs in the packaged configs.
+If you build a portable bundle with `Build_scripts/windows/copy_portable.ps1`, run `portable-windows/CONFIGURE.ps1` to update IPs in the packaged configs.
 
 ### 2) Start Services (4 Terminals)
 
@@ -179,6 +179,12 @@ QuestDB logging is enabled in the HMI backend. Setup notes are in [hmi/QUESTDB_S
 ```bash
 just build-all
 ```
+
+Organized platform-specific build and packaging entry points are available in `Build_scripts/`:
+
+- `Build_scripts/linux/` for native Linux build/package wrappers.
+- `Build_scripts/windows/` for native Windows PowerShell wrappers.
+- `Build_scripts/linux_cross_compile/` for Linux -> Windows `.exe` cross-compile + packaging.
 
 ```bash
 cd apc_engine

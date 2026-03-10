@@ -34,6 +34,8 @@ ehthumbs.db
 
 # Project Specific
 portable/
+portable-linux/
+portable-windows-cross/
 logs/
 deployment/artifacts/
 hmi/config/hmi.db
