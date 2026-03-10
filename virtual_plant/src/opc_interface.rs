@@ -2,7 +2,7 @@ use anyhow::{Result, anyhow};
 use opcua::client::Session;
 use opcua::types::{
     AttributeId, DataValue, NodeId, NumericRange, 
-    ReadValueId, TimestampsToReturn, Variant, WriteValue, StatusCode
+    ReadValueId, TimestampsToReturn, Variant, WriteValue
 };
 
 /// Reads a list of NodeIds in a single network call (Bulk Read).
@@ -68,25 +68,3 @@ pub async fn write_single(session: &Session, node_id: &NodeId, value: f64) -> Re
     Ok(())
 }
 
-pub async fn write_array(
-    session: &Session, 
-    node_id: &NodeId, 
-    values: Vec<f64>
-) -> Result<(), StatusCode> {
-    // Create a WriteValue with a Variant::Array
-    let variant = Variant::from(values);
-    
-    let write_value = WriteValue {
-        node_id: node_id.clone(),
-        attribute_id: AttributeId::Value as u32,
-        index_range: NumericRange::None,
-        value: DataValue::new_now(variant),
-    };
-
-    let results = session.write(&[write_value]).await.map_err(|_| StatusCode::BadUnexpectedError)?;
-    
-    if let Some(code) = results.first() {
-        if code.is_bad() { return Err(*code); }
-    }
-    Ok(())
-}

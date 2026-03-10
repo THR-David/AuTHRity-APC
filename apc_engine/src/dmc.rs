@@ -42,7 +42,6 @@ pub struct DmcController {
     mv_abs_max: Vec<f64>,
     
     // Weights
-    q_diagonal: DVector<f64>,
     mv_base_move_weights: Vec<f64>,
     mv_target_weights: Vec<f64>,  // MV target tracking weights
     mv_optimization_modes: Vec<crate::config::MvOptimizationMode>,
@@ -319,7 +318,6 @@ impl DmcController {
             mv_rate_limits,
             mv_abs_min,
             mv_abs_max,
-            q_diagonal,
             mv_base_move_weights,
             mv_target_weights,
             mv_optimization_modes,

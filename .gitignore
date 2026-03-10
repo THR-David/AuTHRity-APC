@@ -38,6 +38,7 @@ logs/
 deployment/artifacts/
 hmi/config/hmi.db
 controller_host/config/opc_client.env
+opcua_server/config/serversettings.env
 
 # Private Keys / Certs (Security!)
 **/pki/**

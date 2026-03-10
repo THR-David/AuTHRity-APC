@@ -12,6 +12,8 @@ use models::AppState;
 async fn main() {
     env_logger::init();
 
+    config::ensure_server_conf_exists();
+
     // Load configuration
     let cfg = config::Config::load();
 

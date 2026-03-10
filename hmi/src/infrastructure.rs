@@ -261,17 +261,6 @@ impl InfrastructureConfig {
         }
     }
 
-    pub async fn save(&self, path: &str) -> Result<()> {
-        let mut payload = self.clone();
-        payload.normalize_defaults();
-        let content = serde_json::to_string_pretty(&payload)?;
-        if let Some(parent) = Path::new(path).parent() {
-            fs::create_dir_all(parent).await?;
-        }
-        fs::write(path, content).await?;
-        Ok(())
-    }
-
     fn normalize_defaults(&mut self) {
 
 

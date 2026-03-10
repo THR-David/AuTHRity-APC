@@ -41,6 +41,27 @@ interface InfrastructureConfig {
     controller_host_clients?: ControllerHostClientSettings[];
 }
 
+interface OpcSecurityEndpoint {
+    id: string;
+    path: string;
+    security_policy: string;
+    security_mode: string;
+    security_level: number;
+    user_token_ids: string[];
+}
+
+interface OpcSecurityConfig {
+    default_endpoint: string;
+    endpoints: OpcSecurityEndpoint[];
+}
+
+interface OpcUserToken {
+    id: string;
+    user: string;
+    has_password: boolean;
+    x509?: string;
+}
+
 interface ManagedUser {
     id: number;
     username: string;
@@ -97,6 +118,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
     const [hmiClient, setHmiClient] = useState<HmiClientSettings>(defaultHmiClientSettings);
     const [controllerHostClients, setControllerHostClients] = useState<ControllerHostClientSettings[]>([]);
     const [infraStatus, setInfraStatus] = useState<string>('');
+    const [activeOpcSecurityServerId, setActiveOpcSecurityServerId] = useState<string>('');
+    const [opcSecurityConfig, setOpcSecurityConfig] = useState<OpcSecurityConfig | null>(null);
+    const [opcTokens, setOpcTokens] = useState<OpcUserToken[]>([]);
+    const [opcSecurityStatus, setOpcSecurityStatus] = useState<string>('');
+    const [opcTokenDraft, setOpcTokenDraft] = useState({ user: '', pass: '', x509: '' });
+    const [showRestartConfirm, setShowRestartConfirm] = useState(false);
 
     const [users, setUsers] = useState<ManagedUser[]>([]);
     const [usersStatus, setUsersStatus] = useState<string>('');
@@ -132,6 +159,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
             setActiveTab('Infrastructure');
         }
     }, [activeTab, visibleTabs]);
+
+    useEffect(() => {
+        if (activeOpcSecurityServerId) {
+            void fetchOpcSecurityData(activeOpcSecurityServerId);
+        }
+    }, [activeOpcSecurityServerId]);
 
     const fetchAudit = async () => {
         try {
@@ -174,6 +207,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
                 const supervisorList = data.supervisors;
                 setSupervisors(supervisorList);
                 setOpcServers(data.opc_servers);
+                setActiveOpcSecurityServerId('');
+                setOpcSecurityConfig(null);
+                setOpcTokens([]);
                 setHmiClient(data.hmi_client || defaultHmiClientSettings);
                 const savedClients = data.controller_host_clients || [];
                 const mergedClients = supervisorList.map(sup => (
@@ -250,6 +286,196 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
             setInfraStatus('✅ HMI OPC UA client settings saved');
         } catch (e) {
             setInfraStatus(`❌ Error: ${e}`);
+        }
+    };
+
+    const fetchOpcSecurityData = async (opcServerId: string) => {
+        if (!opcServerId) return;
+        setOpcSecurityStatus('Loading OPC server security settings...');
+        try {
+            const [cfgRes, tokRes] = await Promise.all([
+                apiFetch(`/api/prox/opc/security/config?opc_server_id=${encodeURIComponent(opcServerId)}`),
+                apiFetch(`/api/prox/opc/security/tokens?opc_server_id=${encodeURIComponent(opcServerId)}`),
+            ]);
+
+            if (!cfgRes.ok) {
+                setOpcSecurityStatus(`❌ Failed to load security config: ${await cfgRes.text()}`);
+                return;
+            }
+            if (!tokRes.ok) {
+                setOpcSecurityStatus(`❌ Failed to load tokens: ${await tokRes.text()}`);
+                return;
+            }
+
+            const cfg: OpcSecurityConfig = await cfgRes.json();
+            const tokens: OpcUserToken[] = await tokRes.json();
+            setOpcSecurityConfig(cfg);
+            setOpcTokens(tokens);
+            setOpcSecurityStatus('✅ Loaded OPC security settings. Changes require OPC server restart to apply.');
+        } catch (e) {
+            setOpcSecurityStatus(`❌ Error loading OPC security settings: ${e}`);
+        }
+    };
+
+    const saveOpcSecurityConfig = async () => {
+        if (!activeOpcSecurityServerId || !opcSecurityConfig) return;
+        setOpcSecurityStatus('Saving OPC security config...');
+        try {
+            const sanitizedConfig: OpcSecurityConfig = {
+                ...opcSecurityConfig,
+                endpoints: opcSecurityConfig.endpoints.map((ep) => {
+                    const isNoneNone = ep.security_policy === 'None' && ep.security_mode === 'None';
+                    return {
+                        ...ep,
+                        user_token_ids: isNoneNone
+                            ? ep.user_token_ids
+                            : ep.user_token_ids.filter((tokenId) => tokenId !== 'ANONYMOUS'),
+                    };
+                }),
+            };
+
+            const res = await apiFetch(
+                `/api/prox/opc/security/config?opc_server_id=${encodeURIComponent(activeOpcSecurityServerId)}`,
+                {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sanitizedConfig),
+                },
+                true,
+            );
+            const text = await res.text();
+            if (!res.ok) {
+                setOpcSecurityStatus(`❌ Save failed: ${text}`);
+                return;
+            }
+            setOpcSecurityConfig(sanitizedConfig);
+            setOpcSecurityStatus(`✅ ${text}`);
+        } catch (e) {
+            setOpcSecurityStatus(`❌ Save error: ${e}`);
+        }
+    };
+
+    const addOpcEndpointProfile = () => {
+        if (!opcSecurityConfig) return;
+        const id = `profile_${Date.now()}`;
+        const next: OpcSecurityConfig = {
+            ...opcSecurityConfig,
+            default_endpoint: opcSecurityConfig.default_endpoint || id,
+            endpoints: [
+                ...opcSecurityConfig.endpoints,
+                {
+                    id,
+                    path: '/',
+                    security_policy: 'Basic256Sha256',
+                    security_mode: 'SignAndEncrypt',
+                    security_level: 10,
+                    user_token_ids: [],
+                },
+            ],
+        };
+        setOpcSecurityConfig(next);
+    };
+
+    const updateOpcEndpointProfile = (id: string, field: keyof OpcSecurityEndpoint, value: string | number | string[]) => {
+        if (!opcSecurityConfig) return;
+        setOpcSecurityConfig({
+            ...opcSecurityConfig,
+            endpoints: opcSecurityConfig.endpoints.map((ep) => (ep.id === id ? { ...ep, [field]: value } : ep)),
+        });
+    };
+
+    const removeOpcEndpointProfile = (id: string) => {
+        if (!opcSecurityConfig) return;
+        const endpoints = opcSecurityConfig.endpoints.filter((ep) => ep.id !== id);
+        const defaultEndpoint = endpoints.some((ep) => ep.id === opcSecurityConfig.default_endpoint)
+            ? opcSecurityConfig.default_endpoint
+            : (endpoints[0]?.id || '');
+        setOpcSecurityConfig({
+            ...opcSecurityConfig,
+            default_endpoint: defaultEndpoint,
+            endpoints,
+        });
+    };
+
+    const saveOpcToken = async () => {
+        if (!activeOpcSecurityServerId) return;
+        if (!opcTokenDraft.user.trim()) {
+            setOpcSecurityStatus('❌ Username is required');
+            return;
+        }
+        if (!opcTokenDraft.pass.trim() && !opcTokenDraft.x509.trim()) {
+            setOpcSecurityStatus('❌ Provide password or x509 path');
+            return;
+        }
+
+        setOpcSecurityStatus('Saving token...');
+        try {
+            const payload: Record<string, string> = {
+                user: opcTokenDraft.user.trim(),
+            };
+            if (opcTokenDraft.pass.trim()) payload.pass = opcTokenDraft.pass;
+            if (opcTokenDraft.x509.trim()) payload.x509 = opcTokenDraft.x509.trim();
+
+            const res = await apiFetch(
+                `/api/prox/opc/security/tokens?opc_server_id=${encodeURIComponent(activeOpcSecurityServerId)}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                },
+                true,
+            );
+            const text = await res.text();
+            if (!res.ok) {
+                setOpcSecurityStatus(`❌ Token save failed: ${text}`);
+                return;
+            }
+            setOpcTokenDraft({ user: '', pass: '', x509: '' });
+            await fetchOpcSecurityData(activeOpcSecurityServerId);
+            setOpcSecurityStatus(`✅ ${text}`);
+        } catch (e) {
+            setOpcSecurityStatus(`❌ Token save error: ${e}`);
+        }
+    };
+
+    const removeOpcToken = async (tokenId: string) => {
+        if (!activeOpcSecurityServerId) return;
+        setOpcSecurityStatus(`Removing token '${tokenId}'...`);
+        try {
+            const res = await apiFetch(
+                `/api/prox/opc/security/tokens/${encodeURIComponent(tokenId)}?opc_server_id=${encodeURIComponent(activeOpcSecurityServerId)}`,
+                { method: 'DELETE' },
+                true,
+            );
+            const text = await res.text();
+            if (!res.ok) {
+                setOpcSecurityStatus(`❌ Token remove failed: ${text}`);
+                return;
+            }
+            await fetchOpcSecurityData(activeOpcSecurityServerId);
+            setOpcSecurityStatus(`✅ ${text}`);
+        } catch (e) {
+            setOpcSecurityStatus(`❌ Token remove error: ${e}`);
+        }
+    };
+
+    const restartOpcServer = async () => {
+        if (!activeOpcSecurityServerId) return;
+        setOpcSecurityStatus('Requesting OPC server restart...');
+        try {
+            const res = await apiFetch(
+                `/api/prox/opc/restart?opc_server_id=${encodeURIComponent(activeOpcSecurityServerId)}`,
+                { method: 'POST' },
+                true,
+            );
+            const text = await res.text();
+            if (!res.ok) {
+                setOpcSecurityStatus(`❌ Restart failed: ${text}`);
+                return;
+            }
+            setOpcSecurityStatus(`✅ ${text}`);
+        } catch (e) {
+            setOpcSecurityStatus(`❌ Restart error: ${e}`);
         }
     };
 
@@ -384,7 +610,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
     };
 
     const removeOpc = (id: string) => {
-        setOpcServers(opcServers.filter(s => s.id !== id));
+        const next = opcServers.filter(s => s.id !== id);
+        setOpcServers(next);
+        if (activeOpcSecurityServerId === id) {
+            setActiveOpcSecurityServerId(next[0]?.id || '');
+        }
     };
 
     const updateHmiClient = (field: keyof HmiClientSettings, value: string) => {
@@ -395,6 +625,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
         setControllerHostClients(prev => prev.map(client => (
             client.supervisor_id === supervisorId ? { ...client, [field]: value } : client
         )));
+    };
+
+    const toggleOpcSecurityPanel = (opcId: string) => {
+        if (activeOpcSecurityServerId === opcId) {
+            setActiveOpcSecurityServerId('');
+            return;
+        }
+        setActiveOpcSecurityServerId(opcId);
     };
 
     return (
@@ -503,6 +741,193 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
                                         className="w-full bg-transparent border-b border-slate-600 text-indigo-300 font-mono text-xs focus:outline-none focus:border-indigo-500 px-1 py-1"
                                         placeholder="opc.tcp://host:port"
                                     />
+                                    <div className="pt-1">
+                                        <button
+                                            onClick={() => toggleOpcSecurityPanel(opc.id)}
+                                            className={`text-xs px-2 py-1 rounded border ${activeOpcSecurityServerId === opc.id ? 'bg-indigo-600 border-indigo-500 text-white' : 'bg-slate-900 border-slate-700 text-slate-300 hover:text-white'}`}
+                                        >
+                                            {activeOpcSecurityServerId === opc.id ? 'Hide Security' : 'Manage Security'}
+                                        </button>
+                                    </div>
+
+                                    {activeOpcSecurityServerId === opc.id && (
+                                        <div className="mt-3 space-y-3 border border-slate-700 rounded-lg p-3 bg-slate-900/50">
+                                            {opcSecurityStatus && <div className="text-xs text-slate-300">{opcSecurityStatus}</div>}
+
+                                            {opcSecurityConfig && (
+                                                <>
+                                                    <div className="flex items-center justify-between gap-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <label className="text-xs text-slate-300">Default Endpoint</label>
+                                                            <select
+                                                                value={opcSecurityConfig.default_endpoint}
+                                                                onChange={(e) => setOpcSecurityConfig({ ...opcSecurityConfig, default_endpoint: e.target.value })}
+                                                                className="bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                            >
+                                                                {opcSecurityConfig.endpoints.map(ep => (
+                                                                    <option key={ep.id} value={ep.id}>{ep.id}</option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
+                                                        <button onClick={addOpcEndpointProfile} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-2 py-1 rounded">
+                                                            Add Profile
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        {opcSecurityConfig.endpoints.map((ep, idx) => (
+                                                            <div key={`${opc.id}-endpoint-${idx}`} className="grid grid-cols-12 gap-2 items-center bg-slate-800/50 p-2 rounded border border-slate-700">
+                                                                <div className="col-span-2 space-y-1">
+                                                                    <label className="text-[11px] text-slate-400">Endpoint ID</label>
+                                                                    <input
+                                                                        value={ep.id}
+                                                                        onChange={(e) => updateOpcEndpointProfile(ep.id, 'id', e.target.value)}
+                                                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                                    />
+                                                                </div>
+                                                                <div className="col-span-2 space-y-1">
+                                                                    <label className="text-[11px] text-slate-400">Path</label>
+                                                                    <input
+                                                                        value={ep.path}
+                                                                        onChange={(e) => updateOpcEndpointProfile(ep.id, 'path', e.target.value)}
+                                                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                                        placeholder="/"
+                                                                    />
+                                                                </div>
+                                                                <div className="col-span-2 space-y-1">
+                                                                    <label className="text-[11px] text-slate-400">Security Policy</label>
+                                                                    <select
+                                                                        value={ep.security_policy}
+                                                                        onChange={(e) => updateOpcEndpointProfile(ep.id, 'security_policy', e.target.value)}
+                                                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                                    >
+                                                                        {securityPolicyOptions.map(option => (
+                                                                            <option key={option} value={option}>{option}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div className="col-span-2 space-y-1">
+                                                                    <label className="text-[11px] text-slate-400">Security Mode</label>
+                                                                    <select
+                                                                        value={ep.security_mode}
+                                                                        onChange={(e) => updateOpcEndpointProfile(ep.id, 'security_mode', e.target.value)}
+                                                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                                    >
+                                                                        {securityModeOptions.map(option => (
+                                                                            <option key={option} value={option}>{option}</option>
+                                                                        ))}
+                                                                    </select>
+                                                                </div>
+                                                                <div className="col-span-2 space-y-1">
+                                                                    <label className="text-[11px] text-slate-400">Security Level</label>
+                                                                    <input
+                                                                        type="number"
+                                                                        value={ep.security_level}
+                                                                        onChange={(e) => updateOpcEndpointProfile(ep.id, 'security_level', Number(e.target.value) || 0)}
+                                                                        className="w-full bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs"
+                                                                        min={0}
+                                                                    />
+                                                                </div>
+                                                                <button onClick={() => removeOpcEndpointProfile(ep.id)} className="col-span-2 text-xs bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded">
+                                                                    Remove
+                                                                </button>
+                                                                <div className="col-span-12 text-[11px] text-slate-400 flex flex-wrap gap-2">
+                                                                    {opcTokens
+                                                                        .filter((token) => {
+                                                                            if (token.id !== 'ANONYMOUS') return true;
+                                                                            return ep.security_policy === 'None' && ep.security_mode === 'None';
+                                                                        })
+                                                                        .map(token => {
+                                                                        const checked = ep.user_token_ids.includes(token.id);
+                                                                        return (
+                                                                            <label key={`${ep.id}-${token.id}`} className="inline-flex items-center gap-1">
+                                                                                <input
+                                                                                    type="checkbox"
+                                                                                    checked={checked}
+                                                                                    onChange={(e) => {
+                                                                                        const nextIds = e.target.checked
+                                                                                            ? [...ep.user_token_ids, token.id]
+                                                                                            : ep.user_token_ids.filter(id => id !== token.id);
+                                                                                        updateOpcEndpointProfile(ep.id, 'user_token_ids', nextIds);
+                                                                                    }}
+                                                                                />
+                                                                                {token.id}
+                                                                            </label>
+                                                                        );
+                                                                    })}
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+
+                                                    <div className="pt-1">
+                                                        <button onClick={saveOpcSecurityConfig} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded">
+                                                            Save Security Profiles (Restart Required)
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setShowRestartConfirm(true)}
+                                                            className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded ml-2"
+                                                        >
+                                                            Restart OPC Server
+                                                        </button>
+                                                    </div>
+
+                                                    <div className="pt-2 border-t border-slate-700">
+                                                        <div className="text-xs font-bold text-indigo-300 uppercase mb-2">OPC Server User Tokens</div>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            <input
+                                                                value={opcTokenDraft.user}
+                                                                onChange={(e) => setOpcTokenDraft(prev => ({ ...prev, user: e.target.value }))}
+                                                                placeholder="username"
+                                                                className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                                            />
+                                                            <input
+                                                                type="password"
+                                                                value={opcTokenDraft.pass}
+                                                                onChange={(e) => setOpcTokenDraft(prev => ({ ...prev, pass: e.target.value }))}
+                                                                placeholder="password (optional if x509)"
+                                                                className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                                            />
+                                                            <input
+                                                                value={opcTokenDraft.x509}
+                                                                onChange={(e) => setOpcTokenDraft(prev => ({ ...prev, x509: e.target.value }))}
+                                                                placeholder="x509 path (optional)"
+                                                                className="bg-slate-950 border border-slate-700 rounded px-2 py-2 text-xs"
+                                                            />
+                                                        </div>
+                                                        <div className="mt-2">
+                                                            <button onClick={saveOpcToken} className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded">
+                                                                Save Token (Restart Required)
+                                                            </button>
+                                                        </div>
+                                                        <div className="space-y-2 mt-2">
+                                                            {opcTokens
+                                                                .filter((token) => {
+                                                                    if (token.id !== 'ANONYMOUS') return true;
+                                                                    return opcSecurityConfig.endpoints.some((ep) => ep.security_policy === 'None' && ep.security_mode === 'None');
+                                                                })
+                                                                .map(token => (
+                                                                <div key={token.id} className="grid grid-cols-12 gap-2 items-center bg-slate-800/40 border border-slate-700 rounded p-2 text-xs">
+                                                                    <div className="col-span-3 text-slate-100 font-bold">{token.id}</div>
+                                                                    <div className="col-span-3 text-slate-300">{token.user}</div>
+                                                                    <div className="col-span-4 text-slate-400">{token.has_password ? 'password' : ''}{token.has_password && token.x509 ? ' + ' : ''}{token.x509 ? `x509: ${token.x509}` : ''}</div>
+                                                                    <div className="col-span-2 text-right">
+                                                                        {token.id === 'ANONYMOUS' ? (
+                                                                            <span className="text-[11px] text-slate-500">Built-in</span>
+                                                                        ) : (
+                                                                            <button onClick={() => removeOpcToken(token.id)} className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-2 py-1 rounded">
+                                                                                Remove
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                             ))}
                         </div>
@@ -876,6 +1301,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({ isAdmin }) => {
                         </div>
                     </div>
                 </>
+            )}
+
+            {showRestartConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+                    <div className="w-full max-w-md rounded-xl border border-slate-700 bg-slate-900 shadow-2xl">
+                        <div className="px-4 py-3 border-b border-slate-700">
+                            <h4 className="text-sm font-bold text-slate-100">Confirm OPC Server Restart</h4>
+                        </div>
+                        <div className="px-4 py-4 text-sm text-slate-300">
+                            are you sure you want to restart the server
+                        </div>
+                        <div className="px-4 py-3 border-t border-slate-700 flex justify-end gap-2">
+                            <button
+                                onClick={() => setShowRestartConfirm(false)}
+                                className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={async () => {
+                                    setShowRestartConfirm(false);
+                                    await restartOpcServer();
+                                }}
+                                className="text-xs bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded"
+                            >
+                                Yes, Restart
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
         </div>
     );
