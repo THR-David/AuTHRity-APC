@@ -7,7 +7,7 @@ mod historian;
 mod infrastructure; // Added module
 
 use anyhow::Result;
-use axum::{routing::{get, post}, Router};
+use axum::{routing::{get, post, put}, Router};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -113,6 +113,10 @@ async fn main() -> Result<()> {
         .route("/api/infrastructure", get(web_routes::get_infrastructure).post(web_routes::save_infrastructure)) // <--- Infrastructure Registry
         .route("/api/infrastructure/controller-host-clients", post(web_routes::save_controller_host_clients))
         .route("/api/infrastructure/opc-reconnect", post(web_routes::reconnect_opc_worker))
+        .route("/api/prox/opc/security/config", get(web_routes::get_opc_security_config_proxy).put(web_routes::save_opc_security_config_proxy))
+        .route("/api/prox/opc/security/tokens", get(web_routes::list_opc_user_tokens_proxy).post(web_routes::upsert_opc_user_token_proxy))
+        .route("/api/prox/opc/security/tokens/:id", put(web_routes::upsert_opc_user_token_by_id_proxy).delete(web_routes::delete_opc_user_token_proxy))
+        .route("/api/prox/opc/restart", post(web_routes::restart_opc_server_proxy))
         .route("/api/physics/:id", get(web_routes::get_remote_physics)) // <--- Fetch JSON from Supervisor
         // NEW: Controller Management Proxy
         .route("/api/prox/controllers", get(web_routes::list_controllers_proxy))

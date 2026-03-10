@@ -10,6 +10,7 @@ use futures::{sink::SinkExt, stream::StreamExt};
 use serde::{Deserialize, Serialize};
 use reqwest::Client;
 use std::path::Path;
+use std::collections::HashSet;
 use crate::infrastructure::InfrastructureConfig; // Added Import
 use crate::auth::{
     permission_audit_label, required_runtime_write_permission, CsrfVerified, CurrentUser, Permission, Role,
@@ -54,6 +55,39 @@ pub struct ControllerModelQuery {
 pub struct SaveControllerHostClientsRequest {
     pub supervisors: Vec<crate::infrastructure::ServiceConfig>,
     pub controller_host_clients: Vec<crate::infrastructure::ControllerHostClientSettings>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct OpcServerSelectorQuery {
+    pub opc_server_id: Option<String>,
+}
+
+fn normalize_service_url(url: &str) -> String {
+    url.trim().trim_end_matches('/').to_ascii_lowercase()
+}
+
+fn validate_unique_opc_servers(infra: &InfrastructureConfig) -> Result<(), String> {
+    let mut seen_admin_urls: HashSet<String> = HashSet::new();
+    let mut seen_opc_endpoints: HashSet<String> = HashSet::new();
+
+    for opc in &infra.opc_servers {
+        let admin_url = normalize_service_url(&opc.url);
+        if admin_url.is_empty() {
+            return Err(format!("OPC server '{}' has an empty admin URL", opc.name));
+        }
+        if !seen_admin_urls.insert(admin_url.clone()) {
+            return Err(format!("Duplicate OPC server admin URL is not allowed: {}", opc.url));
+        }
+
+        if let Some(endpoint) = opc.opc_endpoint.as_ref() {
+            let endpoint_norm = normalize_service_url(endpoint);
+            if !endpoint_norm.is_empty() && !seen_opc_endpoints.insert(endpoint_norm) {
+                return Err(format!("Duplicate OPC endpoint is not allowed: {}", endpoint));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 pub async fn list_audit_admin(
@@ -230,6 +264,10 @@ pub async fn save_infrastructure(
 ) -> impl IntoResponse {
     if let Err(e) = user.require(Permission::InfraWrite) {
         return e.into_response();
+    }
+
+    if let Err(detail) = validate_unique_opc_servers(&payload) {
+        return (StatusCode::BAD_REQUEST, detail).into_response();
     }
 
     let existing = InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url)
@@ -420,6 +458,304 @@ pub async fn reconnect_opc_worker(
     }
 }
 
+fn select_opc_admin_url(infra: &InfrastructureConfig, opc_server_id: Option<&str>) -> Option<String> {
+    let selected = if let Some(id) = opc_server_id.map(str::trim).filter(|id| !id.is_empty()) {
+        infra.opc_servers.iter().find(|opc| opc.id == id)
+    } else {
+        infra.opc_servers.first()
+    };
+
+    selected
+        .map(|opc| opc.url.trim().trim_end_matches('/').to_string())
+        .filter(|url| !url.is_empty())
+}
+
+pub async fn get_opc_security_config_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/config", opc_admin_url);
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn save_opc_security_config_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    _: CsrfVerified,
+    user: CurrentUser,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/config", opc_admin_url);
+    match client.put(&url).json(&payload).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                state
+                    .auth
+                    .audit(Some(&user), "infra.opc_security.write", Some(&opc_admin_url), "success", None)
+                    .await;
+            }
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn list_opc_user_tokens_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/tokens", opc_admin_url);
+    match client.get(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn upsert_opc_user_token_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    _: CsrfVerified,
+    user: CurrentUser,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/tokens", opc_admin_url);
+    match client.post(&url).json(&payload).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                let target = payload.get("id").and_then(|v| v.as_str()).unwrap_or("<generated>");
+                state
+                    .auth
+                    .audit(Some(&user), "infra.opc_token.upsert", Some(target), "success", None)
+                    .await;
+            }
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn upsert_opc_user_token_by_id_proxy(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    _: CsrfVerified,
+    user: CurrentUser,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/tokens/{}", opc_admin_url, id);
+    match client.put(&url).json(&payload).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                state
+                    .auth
+                    .audit(Some(&user), "infra.opc_token.upsert", Some(&id), "success", None)
+                    .await;
+            }
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn delete_opc_user_token_proxy(
+    AxumPath(id): AxumPath<String>,
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    _: CsrfVerified,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/security/tokens/{}", opc_admin_url, id);
+    match client.delete(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                state
+                    .auth
+                    .audit(Some(&user), "infra.opc_token.delete", Some(&id), "success", None)
+                    .await;
+            }
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
+pub async fn restart_opc_server_proxy(
+    State(state): State<AppState>,
+    Query(query): Query<OpcServerSelectorQuery>,
+    _: CsrfVerified,
+    user: CurrentUser,
+) -> impl IntoResponse {
+    if let Err(e) = user.require(Permission::InfraWrite) {
+        return e.into_response();
+    }
+
+    let infra = match InfrastructureConfig::load_from_db(&state.settings.hmi_auth.database_url).await {
+        Ok(v) => v,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to load infrastructure config: {}", e))
+                .into_response();
+        }
+    };
+
+    let Some(opc_admin_url) = select_opc_admin_url(&infra, query.opc_server_id.as_deref()) else {
+        return (StatusCode::NOT_FOUND, "No OPC server configured in infrastructure settings").into_response();
+    };
+
+    let client = Client::new();
+    let url = format!("{}/api/admin/restart", opc_admin_url);
+    match client.post(&url).send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                state
+                    .auth
+                    .audit(Some(&user), "infra.opc_server.restart", Some(&opc_admin_url), "success", None)
+                    .await;
+            }
+            match resp.text().await {
+                Ok(body) => (status, body).into_response(),
+                Err(e) => (StatusCode::BAD_GATEWAY, format!("Failed to read OPC response: {}", e)).into_response(),
+            }
+        }
+        Err(e) => (StatusCode::BAD_GATEWAY, format!("OPC server unreachable: {}", e)).into_response(),
+    }
+}
+
 // --- DEPLOYMENT HANDLER ---
 pub async fn deploy_bundle(
     State(state): State<AppState>,
@@ -440,7 +776,6 @@ pub async fn deploy_bundle(
     // Default URLs from config
     let mut target_supervisor = state.settings.services.supervisor_url.clone();
     let mut target_opc = state.settings.services.opc_hot_reload_url.clone();
-    let mut target_opc_tcp = String::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.name().unwrap().to_string();
@@ -467,9 +802,6 @@ pub async fn deploy_bundle(
         } else if name == "target_opc" {
              let val = field.text().await.unwrap();
              if !val.trim().is_empty() { target_opc = val; }
-        } else if name == "target_opc_tcp" {
-             let val = field.text().await.unwrap();
-             if !val.trim().is_empty() { target_opc_tcp = val; }
         }
     }
 
@@ -1530,11 +1862,3 @@ fn resample_step_response(raw_points: &[(f64, f64)], num_points: usize, sample_t
     coefficients
 }
 
-/// Helper: Calculate average in time range
-fn calculate_average(
-    data: &[(String, f64)],
-    start: &chrono::DateTime<chrono::Utc>,
-    end: &chrono::DateTime<chrono::Utc>,
-) -> f64 {
-    calculate_baseline(data, start, end)
-}

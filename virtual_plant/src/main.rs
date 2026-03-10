@@ -38,7 +38,6 @@ const NODE_BTM_TEMP_CV: &str = "Btm_Temp:PV";
 const NODE_CSTR_COOLING_SP: &str = "CSTR_Cooling:SP"; 
 const NODE_CSTR_COOLING_PV: &str = "CSTR_Cooling:PV";
 const NODE_CSTR_COOLING_OP: &str = "CSTR_Cooling:OP"; 
-const NODE_CSTR_COOLING_MODE: &str = "CSTR_Cooling:Mode";
 const NODE_CSTR_FEED_DV: &str    = "CSTR_Feed:PV";    
 const NODE_CSTR_TEMP_CV: &str    = "CSTR_Temp:PV";    
 const NODE_CSTR_CONC_CV: &str    = "CSTR_Conc:PV"; 
@@ -73,9 +72,11 @@ async fn main() -> Result<()> {
     println!("   - OPC UA: {}", settings.opcua.endpoint_url);
     println!("   - App: {} ({})", settings.identity.app_name, settings.identity.app_uri);
     println!("   - Speed: {}x real-time", settings.runtime.speed_multiplier);
+    println!("   - CSTR Config: {:?}", settings.cstr);
 
     // 2. Setup Paths & Certificates
     let project_root = PathBuf::from(".");
+    let pki_dir = project_root.join(&settings.paths.pki_dir);
     let cert_path = project_root.join(&settings.paths.cert_path);
     let key_path = project_root.join(&settings.paths.key_path);
 
@@ -83,7 +84,7 @@ async fn main() -> Result<()> {
     let mut client_builder = ClientBuilder::new()
         .application_name(&settings.identity.app_name)
         .application_uri(&settings.identity.app_uri)
-        .pki_dir(project_root)
+        .pki_dir(pki_dir)
         .certificate_path(&cert_path)
         .private_key_path(&key_path)
         .create_sample_keypair(settings.identity.auto_create_keys)
