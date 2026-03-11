@@ -21,7 +21,7 @@ interface InfrastructureConfig {
 
 export const ModelGenerator = () => {
     const [model, setModel] = useState<FullModel>(DEFAULT_MODEL);
-    const [activeTab, setActiveTab] = useState<"Vars" | "Physics" | "Tuning" | "StepResponse" | "Visualize" | "Export">("Vars");
+    const [activeTab, setActiveTab] = useState<"Vars" | "Physics" | "Tuning" | "StepResponse" | "Models" | "Export">("Vars");
     const [selectedGraph, setSelectedGraph] = useState<{cvIdx: number, inputIdx: number, inputType: 'MV' | 'DV'} | null>(null);
 
     // --- DEPLOYMENT STATE ---
@@ -96,6 +96,13 @@ export const ModelGenerator = () => {
         return "target";
     };
 
+    const normalizeModelMode = (rawMode: any): "parametric" | "step_response" => {
+        if (rawMode === "step_response_import" || rawMode === "step_response") {
+            return "step_response";
+        }
+        return "parametric";
+    };
+
     // Fetch Infrastructure on Mount
     useEffect(() => {
         apiFetch('/api/infrastructure')
@@ -155,9 +162,9 @@ export const ModelGenerator = () => {
         const newTau = model.physics.tau.map(row => row.filter((_, i) => i !== mvIdx));
         const newDeadTime = model.physics.deadTime.map(row => row.filter((_, i) => i !== mvIdx));
         
-        const newGainDv = model.cvs.map((_, cvIdx) => [...(model.physics.gainDv[cvIdx] || []), model.physics.gain[cvIdx][mvIdx]]);
-        const newTauDv = model.cvs.map((_, cvIdx) => [...(model.physics.tauDv[cvIdx] || []), model.physics.tau[cvIdx][mvIdx]]);
-        const newDeadTimeDv = model.cvs.map((_, cvIdx) => [...(model.physics.deadTimeDv[cvIdx] || []), model.physics.deadTime[cvIdx][mvIdx]]);
+        const newGainDv = model.cvs.map((_, cvIdx) => [...(model.physics.gainDv[cvIdx] || []), model.physics.gain?.[cvIdx]?.[mvIdx] ?? 0]);
+        const newTauDv = model.cvs.map((_, cvIdx) => [...(model.physics.tauDv[cvIdx] || []), model.physics.tau?.[cvIdx]?.[mvIdx] ?? 0]);
+        const newDeadTimeDv = model.cvs.map((_, cvIdx) => [...(model.physics.deadTimeDv[cvIdx] || []), model.physics.deadTime?.[cvIdx]?.[mvIdx] ?? 0]);
         
         // Handle step response coefficients if in step_response mode
         let newStepCoefficients = model.stepResponseData?.stepCoefficients;
@@ -213,9 +220,9 @@ export const ModelGenerator = () => {
         const newTauDv = model.physics.tauDv.map(row => row.filter((_, i) => i !== dvIdx));
         const newDeadTimeDv = model.physics.deadTimeDv.map(row => row.filter((_, i) => i !== dvIdx));
         
-        const newGain = model.cvs.map((_, cvIdx) => [...(model.physics.gain[cvIdx] || []), model.physics.gainDv[cvIdx][dvIdx]]);
-        const newTau = model.cvs.map((_, cvIdx) => [...(model.physics.tau[cvIdx] || []), model.physics.tauDv[cvIdx][dvIdx]]);
-        const newDeadTime = model.cvs.map((_, cvIdx) => [...(model.physics.deadTime[cvIdx] || []), model.physics.deadTimeDv[cvIdx][dvIdx]]);
+        const newGain = model.cvs.map((_, cvIdx) => [...(model.physics.gain[cvIdx] || []), model.physics.gainDv?.[cvIdx]?.[dvIdx] ?? 0]);
+        const newTau = model.cvs.map((_, cvIdx) => [...(model.physics.tau[cvIdx] || []), model.physics.tauDv?.[cvIdx]?.[dvIdx] ?? 0]);
+        const newDeadTime = model.cvs.map((_, cvIdx) => [...(model.physics.deadTime[cvIdx] || []), model.physics.deadTimeDv?.[cvIdx]?.[dvIdx] ?? 0]);
         
         // Handle step response coefficients if in step_response mode
         let newStepCoefficients = model.stepResponseData?.stepCoefficients;
@@ -308,14 +315,14 @@ export const ModelGenerator = () => {
                     name: raw.metadata?.name || "Controller_Model",
                     desc: raw.metadata?.description || `Loaded from ${controllerId}`
                 },
-                mode: raw.metadata?.model_type || "parametric",
+                mode: normalizeModelMode(raw.metadata?.model_type),
                 tuning: {
                     sampleTime: raw.sample_time ?? raw.tuning?.sample_time ?? 20,
                     tssMin: (raw.tuning?.prediction_horizon * (raw.sample_time || raw.tuning?.sample_time || 20)) / 60 || 20, 
                     controlHorizon: raw.tuning?.control_horizon ?? 10,
                     solverTol: raw.tuning?.solver_tolerance ?? 0.0001,
                     maxIter: raw.tuning?.max_iterations ?? 50,
-                    terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 10
+                    terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 1
                 },
                 cvs: parseVars(raw.variables?.cvs, 'cv'),
                 mvs: parseVars(raw.variables?.mvs, 'mv'),
@@ -388,14 +395,14 @@ export const ModelGenerator = () => {
                         name: raw.metadata?.name || "Imported_Model",
                         desc: raw.metadata?.description || ""
                     },
-                    mode: raw.metadata?.model_type || "parametric",
+                    mode: normalizeModelMode(raw.metadata?.model_type),
                     tuning: {
                         sampleTime: raw.tuning?.sample_time ?? 20,
                         tssMin: (raw.tuning?.prediction_horizon * (raw.tuning?.sample_time || 20)) / 60 || 20, 
                         controlHorizon: raw.tuning?.control_horizon ?? 10,
                         solverTol: raw.tuning?.solver_tolerance ?? 0.0001,
                         maxIter: raw.tuning?.max_iterations ?? 50,
-                        terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 10
+                        terminalWeightFactor: raw.tuning?.terminal_weight_factor ?? 1
                     },
                     cvs: parseVars(raw.variables?.cvs, 'cv'),
                     mvs: parseVars(raw.variables?.mvs, 'mv'),
@@ -436,116 +443,161 @@ export const ModelGenerator = () => {
             try {
                 const text = event.target?.result as string;
                 const lines = text.split('\n');
-                
-                // Parse header (line 2): "0 num_mvs horizon tss_minutes"
-                // Example: "0 9 45 15"
-                let expectedHorizon = 45; // Default
-                let tssMin = 15; // Default
-                
-                if (lines.length > 1) {
-                    const headerParts = lines[1]?.trim().split(/\s+/) || [];
-                    if (headerParts.length >= 4) {
-                        expectedHorizon = parseInt(headerParts[2]) || 45;
-                        tssMin = parseInt(headerParts[3]) || 15;
-                        console.log(`📄 Header: ${headerParts[1]} MVs, ${expectedHorizon} steps, ${tssMin} min TSS`);
-                    }
+                const nonEmpty = lines.map(l => l.trim()).filter(Boolean);
+
+                // Read header strictly from the top: Last Run line, then numeric rows.
+                let scan = 0;
+                if (nonEmpty[0]?.toLowerCase().startsWith("last run:")) {
+                    scan = 1;
                 }
-                
+
+                const headerNumbers: number[] = [];
+                while (scan < nonEmpty.length && headerNumbers.length < 7) {
+                    const value = Number.parseFloat(nonEmpty[scan]);
+                    if (Number.isNaN(value)) break;
+                    headerNumbers.push(value);
+                    scan++;
+                }
+
+                if (headerNumbers.length < 6) {
+                    alert("Failed to parse legacy DMC file header.");
+                    return;
+                }
+
+                const expectedMvs = Math.round(headerNumbers[1]);
+                const expectedCvs = Math.round(headerNumbers[2]);
+                const expectedHorizon = Math.round(headerNumbers[3]);
+                const tssMin = headerNumbers[5];
+
+                if (!expectedMvs || !expectedCvs || !expectedHorizon || !tssMin) {
+                    alert("Failed to parse legacy DMC header values (MV/CV/Horizon/TSS).");
+                    return;
+                }
+
                 const sampleTime = (tssMin * 60) / expectedHorizon;
-                
-                // Parse CV and MV names + coefficients
-                const cvNames: string[] = [];
+
+                const mvDeclRegex = /^-999(?:\.0+)?\s+(\S+)(?:\s+(\S+))?$/i;
+                const cvDeclRegex = /^0(?:\.0+)?\s+(\S+)\s+(\S+)\s+\d+\s+\d+$/i;
+                const cvBlockHeaderRegex = /^(\S+)\s+(\S+)\s+\d+\s+[+-]?\d+\.\d+$/i;
+
                 const mvNames: string[] = [];
-                const coefficients: number[][][] = [];
-                
-                let currentCVIdx = -1;
-                let currentCVData: number[][] = [];
-                let i = 0; // Start from beginning
-                
-                while (i < lines.length) {
-                    const line = lines[i].trim();
-                    i++;
-                    
-                    if (!line || line.length === 0) continue;
-                    
-                    // Skip "Last Run:" line
-                    if (line.startsWith('Last Run:')) continue;
-                    
-                    // CV Header: Line with CV name and units (C or %)
-                    // Must not start with space, must start with letter, must have units indicator
-                    const isCVHeader = !line.startsWith(' ') && 
-                                      /^[A-Za-z]/.test(line) && 
-                                      /\s+(C|%)\s+/.test(line) &&
-                                      !line.includes('e+') && !line.includes('e-');
-                    
-                    if (isCVHeader) {
-                        // Save previous CV
-                        if (currentCVIdx >= 0 && currentCVData.length > 0) {
-                            coefficients.push([...currentCVData]);
-                            currentCVData = [];
-                        }
-                        
-                        const cvName = line.split(/\s+/)[0];
-                        cvNames.push(cvName);
-                        currentCVIdx++;
-                        console.log(`Found CV: ${cvName}`);
+                const cvNames: string[] = [];
+                const mvUnits: string[] = [];
+                const cvUnits: string[] = [];
+
+                // Read declaration section line-by-line until we have the counts from header.
+                for (let i = scan; i < nonEmpty.length; i++) {
+                    const line = nonEmpty[i];
+                    const firstToken = line.split(/\s+/)[0] || "";
+
+                    const mvMatch = line.match(mvDeclRegex);
+                    if (firstToken.startsWith("-999") && mvMatch && mvNames.length < expectedMvs) {
+                        mvNames.push(mvMatch[1]);
+                        mvUnits.push(mvMatch[2] || '');
                         continue;
                     }
-                    
-                    // MV Header: Line with MV name followed by unit and scientific notation number
-                    // Format: "FC1  %                                -1.400000000000000e+000"
-                    // OR: "total_feed                                       0.000000000000000e+000"
-                    const isMVHeader = !line.startsWith(' ') && 
-                                      /^[A-Za-z_]/.test(line) && 
-                                      /[+-]?\d+\.\d+e[+-]\d+/.test(line);
-                    
-                    if (isMVHeader) {
-                        const mvName = line.split(/\s+/)[0];
-                        
-                        // Only collect MV names once (from first CV)
-                        if (currentCVIdx === 0) {
-                            mvNames.push(mvName);
-                            console.log(`Found MV: ${mvName}`);
+
+                    const cvMatch = line.match(cvDeclRegex);
+                    if (firstToken.startsWith("0") && cvMatch && cvNames.length < expectedCvs) {
+                        cvNames.push(cvMatch[1]);
+                        cvUnits.push(cvMatch[2]);
+                    }
+
+                    if (mvNames.length >= expectedMvs && cvNames.length >= expectedCvs) {
+                        scan = i + 1;
+                        break;
+                    }
+                }
+
+                if (mvNames.length !== expectedMvs || cvNames.length !== expectedCvs) {
+                    alert(`Failed to parse declarations: expected ${expectedCvs} CVs and ${expectedMvs} MVs, found ${cvNames.length} CVs and ${mvNames.length} MVs.`);
+                    return;
+                }
+
+                // Find the first CV block start by exact CV name match.
+                let idx = nonEmpty.findIndex((l, lineIdx) => {
+                    if (lineIdx < scan) return false;
+                    const m = l.match(cvBlockHeaderRegex);
+                    return !!m && cvNames.includes(m[1]);
+                });
+
+                if (idx < 0) {
+                    alert("Failed to locate CV response blocks in legacy DMC file.");
+                    return;
+                }
+
+                const coefficients: number[][][] = [];
+                const mvNameSet = new Set(mvNames);
+
+                for (let cvIdx = 0; cvIdx < expectedCvs; cvIdx++) {
+                    while (idx < nonEmpty.length) {
+                        const m = nonEmpty[idx].match(cvBlockHeaderRegex);
+                        if (m && m[1] === cvNames[cvIdx]) break;
+                        idx++;
+                    }
+
+                    if (idx >= nonEmpty.length) {
+                        alert(`Failed to find CV block for ${cvNames[cvIdx]}.`);
+                        return;
+                    }
+
+                    idx++; // move past CV header
+
+                    const cvResponses = new Map<string, number[]>();
+
+                    while (idx < nonEmpty.length) {
+                        const current = nonEmpty[idx];
+                        const cvHeader = current.match(cvBlockHeaderRegex);
+                        if (cvHeader && cvHeader[1] !== cvNames[cvIdx]) {
+                            break;
                         }
-                        
-                        // Read coefficient lines
+
+                        const token = current.split(/\s+/)[0] || '';
+                        if (!mvNameSet.has(token)) {
+                            idx++;
+                            continue;
+                        }
+
+                        const mvName = token;
+                        idx++; // move to coefficient rows
+
                         const mvCoeffs: number[] = [];
-                        
-                        while (i < lines.length) {
-                            const coeffLine = lines[i].trim();
-                            
-                            // Stop if we hit another header (CV or MV)
-                            if (coeffLine && !coeffLine.startsWith(' ')) {
-                                const isNextHeader = /^[A-Za-z_]/.test(coeffLine);
-                                if (isNextHeader) break;
+                        while (idx < nonEmpty.length && mvCoeffs.length < expectedHorizon) {
+                            const row = nonEmpty[idx];
+                            const rowToken = row.split(/\s+/)[0] || '';
+                            const nextCvHeader = row.match(cvBlockHeaderRegex);
+                            if (mvNameSet.has(rowToken) || (nextCvHeader && nextCvHeader[1] !== cvNames[cvIdx])) {
+                                break;
                             }
-                            
-                            i++;
-                            
-                            if (!coeffLine || coeffLine.length === 0) continue;
-                            
-                            // Parse numbers from line (scientific notation)
-                            const values = coeffLine.split(/\s+/)
+
+                            const values = row
+                                .split(/\s+/)
                                 .map(s => parseFloat(s))
                                 .filter(v => !isNaN(v));
-                            
+
                             if (values.length > 0) {
                                 mvCoeffs.push(...values);
                             }
-                            
-                            // Stop after reading expected number from header
-                            if (mvCoeffs.length >= expectedHorizon) break;
+                            idx++;
                         }
-                        
+
                         if (mvCoeffs.length > 0) {
-                            currentCVData.push(mvCoeffs);
+                            cvResponses.set(mvName, mvCoeffs.slice(0, expectedHorizon));
                         }
                     }
-                }
-                
-                // Save last CV
-                if (currentCVIdx >= 0 && currentCVData.length > 0) {
-                    coefficients.push(currentCVData);
+
+                    const cvData: number[][] = mvNames.map((mvName) => {
+                        const found = cvResponses.get(mvName);
+                        if (!found) {
+                            return Array(expectedHorizon).fill(0);
+                        }
+                        if (found.length >= expectedHorizon) {
+                            return found.slice(0, expectedHorizon);
+                        }
+                        return [...found, ...Array(expectedHorizon - found.length).fill(0)];
+                    });
+
+                    coefficients.push(cvData);
                 }
                 
                 console.log(`✅ Parsed: ${cvNames.length} CVs, ${mvNames.length} MVs`);
@@ -566,7 +618,7 @@ export const ModelGenerator = () => {
                         id: `cv_${i}_${Date.now()}`,
                         name,
                         desc: `Imported from ${file.name}`,
-                        units: name.includes('TI') ? '°C' : '%',
+                        units: cvUnits[i] || '',
                         weight: name.includes('OP') ? 0 : 1, // FC1OP, FC2OP get weight 0
                         alpha: 0,
                         ece_factor: limits.high - limits.low, // Auto-calculate from span (80)
@@ -578,7 +630,7 @@ export const ModelGenerator = () => {
                     id: `mv_${i}_${Date.now()}`,
                     name,
                     desc: `Imported from ${file.name}`,
-                    units: 'kg/h',
+                    units: mvUnits[i] || '',
                     weight: 1,
                     maxMove: 1,
                     limits: { lowLow: 0, low: 2, high: 18, highHigh: 20 }
@@ -587,7 +639,7 @@ export const ModelGenerator = () => {
                 // Update model
                 setModel({
                     ...model,
-                    mode: "step_response_import",  // Legacy DMC import
+                    mode: "step_response",
                     meta: { ...model.meta, name: file.name.replace(/\.[^/.]+$/, "") },
                     cvs: newCVs,
                     mvs: newMVs,
@@ -1019,25 +1071,24 @@ export const ModelGenerator = () => {
                         className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-1 text-sm font-bold text-slate-300 outline-none hover:border-indigo-500 transition"
                     >
                         <option value="parametric">📐 Parametric (FOPDT)</option>
-                        <option value="step_response_import">📦 Step Response (Legacy Import)</option>
-                        <option value="step_response">🔬 Step Response (Generate)</option>
+                        <option value="step_response">🔬 Step Response</option>
                     </select>
                 </div>
                 <div className="flex gap-2">
                     <button 
                         onClick={handleLoadFromController}
-                        className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg cursor-pointer text-sm font-bold text-white transition"
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg cursor-pointer text-sm font-bold text-white transition"
                     >
                         <Download size={16} /> Load from Controller
                     </button>
-                    {model.mode === "step_response_import" && (
-                        <label className="flex items-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg cursor-pointer text-sm font-bold text-white">
-                            <FileText size={16} /> Import Legacy DMC .txt
-                            <input type="file" className="hidden" accept=".txt" onChange={handleStepResponseUpload}/>
+                    {model.mode === "step_response" && (
+                        <label className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg cursor-pointer text-sm font-bold text-slate-200">
+                            <FileText size={16} /> Import DMC .mdl
+                            <input type="file" className="hidden" accept=".txt,.mdl,text/plain" onChange={handleStepResponseUpload}/>
                         </label>
                     )}
                     {model.mode === "step_response" && (
-                        <label className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-lg cursor-pointer text-sm font-bold text-white">
+                        <label className="flex items-center gap-2 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg cursor-pointer text-sm font-bold text-white">
                             <Upload size={16} /> Import Step Response JSON
                             <input type="file" className="hidden" accept=".json" onChange={handleStepResponseJsonImport} multiple/>
                         </label>
@@ -1056,10 +1107,8 @@ export const ModelGenerator = () => {
                     let tabs: string[] = [];
                     if (model.mode === "parametric") {
                         tabs = ["Vars", "Physics", "Tuning", "Export"];
-                    } else if (model.mode === "step_response_import") {
-                        tabs = ["Vars", "Physics", "Tuning", "Visualize", "Export"];
                     } else if (model.mode === "step_response") {
-                        tabs = ["Vars", "Physics", "Tuning", "StepResponse", "Visualize", "Export"];
+                        tabs = ["Vars", "Physics", "Tuning", "StepResponse", "Models", "Export"];
                     }
                     
                     return tabs.map(t => (
@@ -1091,7 +1140,7 @@ export const ModelGenerator = () => {
                                     limits: {low:0, high:100, lowLow:0, highHigh:100, target:50} 
                                 };
                                 updateMatrixSize([...model.cvs, newCV], model.mvs, model.dvs);
-                            }} className="p-1 bg-emerald-500/20 text-emerald-400 rounded"><Plus size={16}/></button></div>
+                            }} className="p-1 bg-indigo-500/20 text-indigo-300 rounded hover:bg-indigo-500/30"><Plus size={16}/></button></div>
                             <div className="mb-4">
                                 <button
                                     type="button"
@@ -1181,7 +1230,7 @@ export const ModelGenerator = () => {
 
                         {/* MVs TABLE */}
                         <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 overflow-x-auto">
-                            <div className="flex justify-between mb-4"><h3 className="font-bold text-amber-300">Manipulated Variables (MVs)</h3> <button onClick={() => updateMatrixSize(model.cvs, [...model.mvs, { id: Date.now().toString(), name: `MV${model.mvs.length+1}`, desc: "", units: "", weight: 1, maxMove: 5, mvOptimizationMode: "target", limits: {low:0, high:100, lowLow:0, highHigh:100}, target: undefined, targetWeight: 0 }], model.dvs)} className="p-1 bg-emerald-500/20 text-emerald-400 rounded"><Plus size={16}/></button></div>
+                            <div className="flex justify-between mb-4"><h3 className="font-bold text-indigo-300">Manipulated Variables (MVs)</h3> <button onClick={() => updateMatrixSize(model.cvs, [...model.mvs, { id: Date.now().toString(), name: `MV${model.mvs.length+1}`, desc: "", units: "", weight: 1, maxMove: 5, mvOptimizationMode: "target", limits: {low:0, high:100, lowLow:0, highHigh:100}, target: undefined, targetWeight: 0 }], model.dvs)} className="p-1 bg-indigo-500/20 text-indigo-300 rounded hover:bg-indigo-500/30"><Plus size={16}/></button></div>
                             <div className="mb-4">
                                 <button
                                     type="button"
@@ -1262,8 +1311,8 @@ export const ModelGenerator = () => {
                          {/* DVs TABLE */}
                          <div className="bg-slate-900/50 p-4 rounded-xl border border-slate-800 overflow-x-auto">
                             <div className="flex justify-between mb-4">
-                                <h3 className="font-bold text-pink-300">Disturbance Variables (DVs)</h3> 
-                                <button onClick={() => updateMatrixSize(model.cvs, model.mvs, [...model.dvs, { id: Date.now().toString(), name: `DV${model.dvs.length+1}`, desc: "", units: "", weight: 0, limits: {low:0, high:100, lowLow:0, highHigh:100} }])} className="p-1 bg-emerald-500/20 text-emerald-400 rounded hover:bg-emerald-500/30"><Plus size={16}/></button>
+                                <h3 className="font-bold text-indigo-300">Disturbance Variables (DVs)</h3> 
+                                <button onClick={() => updateMatrixSize(model.cvs, model.mvs, [...model.dvs, { id: Date.now().toString(), name: `DV${model.dvs.length+1}`, desc: "", units: "", weight: 0, limits: {low:0, high:100, lowLow:0, highHigh:100} }])} className="p-1 bg-indigo-500/20 text-indigo-300 rounded hover:bg-indigo-500/30"><Plus size={16}/></button>
                             </div>
                             <div className="mb-4">
                                 <button
@@ -1486,9 +1535,9 @@ export const ModelGenerator = () => {
                                                 </p>
                                             </div>
                                             
-                                            <label className="flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg cursor-pointer text-sm font-bold text-white w-full">
+                                            <label className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-700 hover:bg-indigo-600 rounded-lg cursor-pointer text-sm font-bold text-white w-full">
                                                 <FileText size={16} /> Re-import Legacy Step Response File
-                                                <input type="file" className="hidden" accept=".txt" onChange={handleStepResponseUpload}/>
+                                                <input type="file" className="hidden" accept=".txt,.mdl,text/plain" onChange={handleStepResponseUpload}/>
                                             </label>
                                         </div>
                                     ) : (
@@ -1503,15 +1552,15 @@ export const ModelGenerator = () => {
                                                 </div>
                                             </div>
                                             
-                                            <div className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-center hover:border-purple-500 transition">
+                                            <div className="border-2 border-dashed border-slate-700 rounded-lg p-8 text-center hover:border-indigo-500 transition">
                                                 <FileText className="mx-auto text-slate-600 mb-3" size={48} />
                                                 <label className="cursor-pointer">
-                                                    <span className="text-slate-400 hover:text-purple-400 transition">
-                                                        Click to browse or drag & drop .txt file
+                                                    <span className="text-slate-400 hover:text-indigo-300 transition">
+                                                        Click to browse or drag & drop .mdl/.txt file
                                                     </span>
-                                                    <input type="file" className="hidden" accept=".txt" onChange={handleStepResponseUpload}/>
+                                                    <input type="file" className="hidden" accept=".txt,.mdl,text/plain" onChange={handleStepResponseUpload}/>
                                                 </label>
-                                                <p className="text-xs text-slate-600 mt-2">Supported: Legacy DMC format (ModelA_orig.txt)</p>
+                                                <p className="text-xs text-slate-600 mt-2">Supported: Legacy DMC formats (.mdl, .txt)</p>
                                             </div>
                                             
                                             <div className="bg-slate-800/50 rounded p-4 border border-slate-700">
@@ -1538,7 +1587,7 @@ export const ModelGenerator = () => {
                              <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Control Horizon (Moves)</label><input type="number" value={model.tuning.controlHorizon} onChange={e => setModel({...model, tuning: {...model.tuning, controlHorizon: parseFloat(e.target.value)}})} className={numInputClass}/></div>
                             <div><div className="p-3 bg-indigo-500/10 rounded-lg border border-indigo-500/20 mt-4"><span className="text-indigo-300 text-xs font-bold block">Calculated Prediction Horizon</span><span className="text-2xl font-bold text-white">{Math.ceil((model.tuning.tssMin * 60) / model.tuning.sampleTime)} <span className="text-sm text-slate-500">steps</span></span></div></div>
                         </div>
-                        <h3 className="font-bold text-emerald-300 mb-4 border-b border-slate-800 pb-2">Optimization Solver</h3>
+                        <h3 className="font-bold text-indigo-300 mb-4 border-b border-slate-800 pb-2">Optimization Solver</h3>
                         <div className="grid grid-cols-2 gap-6">
                             <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Solver Tolerance</label><p className="text-[10px] text-slate-600 mb-1">Stop when error &lt; value</p><input type="number" step="0.00001" value={model.tuning.solverTol} onChange={e => setModel({...model, tuning: {...model.tuning, solverTol: parseFloat(e.target.value)}})} className={numInputClass}/></div>
                             <div><label className="block text-xs text-slate-500 font-bold uppercase mb-1">Max Iterations</label><p className="text-[10px] text-slate-600 mb-1">Safety stop to prevent infinite loops</p><input type="number" value={model.tuning.maxIter} onChange={e => setModel({...model, tuning: {...model.tuning, maxIter: parseFloat(e.target.value)}})} className={numInputClass}/></div>
@@ -1551,12 +1600,12 @@ export const ModelGenerator = () => {
                     <div className="space-y-6 max-w-2xl">
 
                         {/* 1. DIRECT DEPLOy */}
-                        <div className="bg-slate-900/50 p-6 rounded-xl border-2 border-emerald-600/30 overflow-hidden shadow-lg relative">
-                             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-cyan-500"></div>
+                            <div className="bg-slate-900/50 p-6 rounded-xl border-2 border-indigo-600/30 overflow-hidden shadow-lg relative">
+                                <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 to-slate-500"></div>
                              <div className="flex justify-between items-start mb-4">
                                 <div>
                                     <h3 className="font-bold text-white text-xl flex items-center gap-2">
-                                        <Rocket className="text-emerald-400" /> Direct Push
+                                        <Rocket className="text-indigo-300" /> Direct Push
                                     </h3>
                                     <p className="text-sm text-slate-400 mt-1">
                                         Push files to controller host / OPC server. This does not start or stop controllers.
@@ -1566,13 +1615,13 @@ export const ModelGenerator = () => {
 
                              <div className="grid grid-cols-2 gap-4 mb-4">
                                 <div>
-                                    <label className="flex items-center gap-2 text-[10px] font-bold text-cyan-400 uppercase mb-1">
+                                    <label className="flex items-center gap-2 text-[10px] font-bold text-indigo-300 uppercase mb-1">
                                         <Network size={12}/> Target OPC Server
                                     </label>
                                     <select 
                                         value={selectedOpc}
                                         onChange={(e) => setSelectedOpc(e.target.value)}
-                                        className="w-full bg-slate-800 border border-slate-700 rounded text-xs px-2 py-2 text-slate-300 focus:outline-none focus:border-cyan-500"
+                                        className="w-full bg-slate-800 border border-slate-700 rounded text-xs px-2 py-2 text-slate-300 focus:outline-none focus:border-indigo-500"
                                     >
                                         {infrastructure.opc_servers.length === 0 && <option value="http://127.0.0.1:9090">Default (Localhost)</option>}
                                         {infrastructure.opc_servers.map(s => (
@@ -1601,7 +1650,7 @@ export const ModelGenerator = () => {
                                 <button 
                                     onClick={() => handleDirectDeploy('nodes')}
                                     disabled={isDeploying || !selectedOpc}
-                                    className="py-3 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded shadow-lg transition-all flex flex-col items-center justify-center gap-1 text-xs"
+                                    className="py-3 bg-slate-700 hover:bg-slate-600 disabled:bg-slate-700 disabled:text-slate-500 text-slate-100 font-bold rounded shadow-lg transition-all flex flex-col items-center justify-center gap-1 text-xs"
                                 >
                                     {isDeploying && deployStatus.includes('Nodes') ? (
                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1614,7 +1663,7 @@ export const ModelGenerator = () => {
                                 <button 
                                     onClick={() => handleDirectDeploy('controller')}
                                     disabled={isDeploying || !selectedSup}
-                                    className="py-3 bg-indigo-600 hover:bg-indigo-500 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded shadow-lg transition-all flex flex-col items-center justify-center gap-1 text-xs"
+                                    className="py-3 bg-indigo-700 hover:bg-indigo-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold rounded shadow-lg transition-all flex flex-col items-center justify-center gap-1 text-xs"
                                 >
                                     {isDeploying && deployStatus.includes('Controller') ? (
                                         <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -1635,11 +1684,11 @@ export const ModelGenerator = () => {
                         <div className="grid grid-cols-2 gap-6 mb-8">
                             <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 text-center">
                                 <h3 className="font-bold text-white text-lg mb-2">Save Configuration</h3>
-                                <button onClick={() => downloadFile(`${model.meta.name || "Model"}.json`, generateJson(), "application/json")} className="px-6 py-3 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-lg flex items-center gap-2 mx-auto"><Save size={18}/> Download .json</button>
+                                <button onClick={() => downloadFile(`${model.meta.name || "Model"}.json`, generateJson(), "application/json")} className="px-6 py-3 bg-indigo-700 hover:bg-indigo-600 text-white font-bold rounded-lg flex items-center gap-2 mx-auto"><Save size={18}/> Download .json</button>
                             </div>
                             <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800 text-center">
                                 <h3 className="font-bold text-white text-lg mb-2">Export OPC Nodes</h3>
-                                <button onClick={() => downloadFile(`${model.meta.name || "Model"}_nodes.yaml`, generateYaml(), "text/yaml")} className="px-6 py-3 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg flex items-center gap-2 mx-auto"><Download size={18}/> Download .yaml</button>
+                                <button onClick={() => downloadFile(`${model.meta.name || "Model"}_nodes.yaml`, generateYaml(), "text/yaml")} className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-slate-100 font-bold rounded-lg flex items-center gap-2 mx-auto"><Download size={18}/> Download .yaml</button>
                             </div>
                         </div>
                     </div>
@@ -1655,7 +1704,7 @@ export const ModelGenerator = () => {
                     />
                 )}
 
-                {activeTab === "Visualize" && (
+                {activeTab === "Models" && (
                     <div className="space-y-6">
                         <div className="bg-slate-900/50 p-6 rounded-xl border border-slate-800">
                             <h3 className="font-bold text-white text-lg mb-4">📊 Model Visualization</h3>
@@ -1677,7 +1726,7 @@ export const ModelGenerator = () => {
                             </div>
 
                             {/* Step Response Coverage */}
-                            {(model.mode === "step_response" || model.mode === "step_response_import") && model.stepResponseData && (
+                            {model.mode === "step_response" && model.stepResponseData && (
                                 <div className="bg-blue-900/20 border border-blue-600/30 rounded-lg p-4 mb-6">
                                     <h4 className="font-bold text-blue-300 mb-3">Step Response Coverage</h4>
                                     <div className="grid grid-cols-2 gap-4">
@@ -1700,7 +1749,7 @@ export const ModelGenerator = () => {
                             )}
 
                             {/* Model Matrix Visualization */}
-                            {(model.mode === "step_response" || model.mode === "step_response_import") && model.stepResponseData && (
+                            {model.mode === "step_response" && model.stepResponseData && (
                                 <div className="bg-slate-900/50 border border-slate-700 rounded-lg p-4">
                                     <h4 className="font-bold text-white mb-4">📈 Model Matrix - Step Response Curves</h4>
                                     <p className="text-xs text-slate-400 mb-4">Click any graph to view details. Rows = CVs, Columns = Inputs (MVs + DVs)</p>
@@ -1733,6 +1782,8 @@ export const ModelGenerator = () => {
                                                 {model.mvs.map((mv, mvIdx) => {
                                                     const coeffs = model.stepResponseData?.stepCoefficients?.[cvIdx]?.[mvIdx] || [];
                                                     const hasData = coeffs.some(v => v !== 0);
+                                                    const finalGain = coeffs[coeffs.length - 1] ?? 0;
+                                                    const curveColor = finalGain < 0 ? '#f43f5e' : '#fbbf24';
                                                     const chartData = coeffs.map((gain, idx) => ({
                                                         time: idx * model.tuning.sampleTime,
                                                         gain
@@ -1748,7 +1799,7 @@ export const ModelGenerator = () => {
                                                             {hasData ? (
                                                                 <ResponsiveContainer width="100%" height="100%">
                                                                     <LineChart data={chartData} margin={{top: 5, right: 5, bottom: 5, left: 5}}>
-                                                                        <Line type="monotone" dataKey="gain" stroke="#fbbf24" strokeWidth={1.5} dot={false} />
+                                                                        <Line type="monotone" dataKey="gain" stroke={curveColor} strokeWidth={1.5} dot={false} />
                                                                     </LineChart>
                                                                 </ResponsiveContainer>
                                                             ) : (
@@ -1762,6 +1813,8 @@ export const ModelGenerator = () => {
                                                 {model.dvs.map((dv, dvIdx) => {
                                                     const coeffs = model.stepResponseData?.dvCoefficients?.[cvIdx]?.[dvIdx] || [];
                                                     const hasData = coeffs.some(v => v !== 0);
+                                                    const finalGain = coeffs[coeffs.length - 1] ?? 0;
+                                                    const curveColor = finalGain < 0 ? '#f43f5e' : '#a78bfa';
                                                     const chartData = coeffs.map((gain, idx) => ({
                                                         time: idx * model.tuning.sampleTime,
                                                         gain
@@ -1777,7 +1830,7 @@ export const ModelGenerator = () => {
                                                             {hasData ? (
                                                                 <ResponsiveContainer width="100%" height="100%">
                                                                     <LineChart data={chartData} margin={{top: 5, right: 5, bottom: 5, left: 5}}>
-                                                                        <Line type="monotone" dataKey="gain" stroke="#ec4899" strokeWidth={1.5} dot={false} />
+                                                                        <Line type="monotone" dataKey="gain" stroke={curveColor} strokeWidth={1.5} dot={false} />
                                                                     </LineChart>
                                                                 </ResponsiveContainer>
                                                             ) : (
@@ -1826,7 +1879,10 @@ export const ModelGenerator = () => {
                                     time: idx * model.tuning.sampleTime,
                                     gain
                                 }));
-                                const color = selectedGraph.inputType === 'MV' ? '#fbbf24' : '#ec4899';
+                                const finalGain = coeffs[coeffs.length - 1] ?? 0;
+                                const color = finalGain < 0
+                                    ? '#f43f5e'
+                                    : (selectedGraph.inputType === 'MV' ? '#fbbf24' : '#a78bfa');
 
                                 return (
                                     <>

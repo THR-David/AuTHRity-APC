@@ -48,7 +48,7 @@ export interface TuningConfig {
 
 export interface FullModel {
     meta: { name: string; desc: string };
-    mode: "parametric" | "step_response" | "step_response_import";
+    mode: "parametric" | "step_response";
     cvs: VarConfig[];
     mvs: VarConfig[];
     dvs: VarConfig[]; // New: Disturbance Variables
